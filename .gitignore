@@ -1,0 +1,39 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Swift / SwiftPM
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build outputs
+dist/
+build/
+.flatpak-builder/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Vendored third-party builds
+apps/macos/vendor/
