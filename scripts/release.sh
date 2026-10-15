@@ -28,9 +28,11 @@ if git rev-parse "v$v" >/dev/null 2>&1; then
 fi
 
 git pull --ff-only
-echo "$v" > VERSION
-git add VERSION
-git commit -m "Release $v"
+if [[ "$(tr -d '[:space:]' < VERSION)" != "$v" ]]; then
+  echo "$v" > VERSION
+  git add VERSION
+  git commit -m "Release $v"
+fi
 git tag -a "v$v" -m "Release $v"
 git push origin main "v$v"
 echo "Tagged v$v. CI will build and publish the release."
