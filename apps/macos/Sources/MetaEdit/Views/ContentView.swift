@@ -22,10 +22,10 @@ struct ContentView: View {
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { state.saveSelected() } label: { Label(tr("Save"), systemImage: "square.and.arrow.down") }
-                    .disabled(!state.selectionIsDirty)
+                    .disabled(!state.selectionIsDirty || state.isSaving)
                     .help(tr("Save selected files (⌘S)"))
                 Button { state.saveAll() } label: { Label(tr("Save All"), systemImage: "square.and.arrow.down.on.square") }
-                    .disabled(state.dirtyFiles.isEmpty)
+                    .disabled(state.dirtyFiles.isEmpty || state.isSaving)
                     .help(tr("Save all changed files (⇧⌘S)"))
             }
         }

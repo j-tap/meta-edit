@@ -7,20 +7,29 @@ import Observation
 final class AppState {
     static let shared = AppState()
 
+    private static let preserveModificationDateKey = "preserveModificationDate"
+    /// How long a status message replaces the file count under the list.
+    private static let statusDuration: Duration = .seconds(4)
+
     var files: [FileItem] = []
     var selection: Set<UUID> = []
     var filterText = ""
     var pendingSave: SaveRequest?
-    var isLoading = false
-    var isSaving = false
-    var status: String?
+    private(set) var status: String?
     var preserveModificationDate: Bool {
-        didSet { UserDefaults.standard.set(preserveModificationDate, forKey: "preserveModificationDate") }
+        didSet { UserDefaults.standard.set(preserveModificationDate, forKey: Self.preserveModificationDateKey) }
     }
 
+    private let loads = SerialTaskQueue()
+    private let saves = SerialTaskQueue()
+    @ObservationIgnored private var statusReset: Task<Void, Never>?
+
     init() {
-        preserveModificationDate = UserDefaults.standard.object(forKey: "preserveModificationDate") as? Bool ?? true
+        preserveModificationDate = UserDefaults.standard.object(forKey: Self.preserveModificationDateKey) as? Bool ?? true
     }
+
+    var isLoading: Bool { loads.isBusy }
+    var isSaving: Bool { saves.isBusy }
 
     var filteredFiles: [FileItem] {
         let query = filterText.trimmingCharacters(in: .whitespaces)
@@ -34,17 +43,29 @@ final class AppState {
     var dirtyFiles: [FileItem] { files.filter(\.isDirty) }
     var selectionIsDirty: Bool { selectedFiles.contains(where: \.isDirty) }
 
+    /// Shows `message` under the list for a few seconds, then the file count again.
+    private func showStatus(_ message: String) {
+        status = message
+        statusReset?.cancel()
+        statusReset = Task {
+            try? await Task.sleep(for: Self.statusDuration)
+            guard !Task.isCancelled else { return }
+            status = nil
+        }
+    }
+
     // MARK: Adding files
 
-    func addURLs(_ urls: [URL]) {
-        Task { await load(urls) }
+    /// Adds files and the contents of folders in the background. The returned task finishes when they are in the list.
+    @discardableResult
+    func addURLs(_ urls: [URL]) -> Task<Void, Never> {
+        loads.enqueue { await self.load(urls) }
     }
 
     private func load(_ urls: [URL]) async {
-        isLoading = true
-        defer { isLoading = false }
-        var seen = Set(files.map { $0.url.standardizedFileURL.path })
         let expanded = await Task.detached(priority: .userInitiated) { Self.expand(urls) }.value
+        // Loads are queued, so the list already holds everything earlier loads added.
+        var seen = Set(files.map { $0.url.standardizedFileURL.path })
         var added: [FileItem] = []
         var skipped = 0
         for url in expanded {
@@ -54,11 +75,9 @@ final class AppState {
                 continue
             }
             seen.insert(path)
-            let item = await Task.detached(priority: .userInitiated) {
-                let item = FileItem(url: url)
-                item.load()
-                return item
-            }.value
+            let snapshot = await Task.detached(priority: .userInitiated) { FileItem.read(url) }.value
+            let item = FileItem(url: url)
+            item.apply(snapshot)
             files.append(item)
             added.append(item)
         }
@@ -66,9 +85,9 @@ final class AppState {
             selection = [first.id]
         }
         if added.isEmpty {
-            status = skipped > 0 ? tr("Already in the list") : tr("No files found")
+            showStatus(skipped > 0 ? tr("Already in the list") : tr("No files found"))
         } else {
-            status = trPlural("Added %d files", added.count)
+            showStatus(trPlural("Added %d files", added.count))
         }
     }
 
@@ -101,7 +120,19 @@ final class AppState {
 
     func remove(_ ids: Set<UUID>) {
         let dirty = files.filter { ids.contains($0.id) && $0.isDirty }
-        if !dirty.isEmpty, !confirmDiscardingChanges(dirty) { return }
+        switch askAboutUnsavedChanges(dirty) {
+        case .cancel:
+            break
+        case .discard:
+            removeFromList(ids)
+        case .save:
+            Task {
+                if await saveBeforeClosing(dirty) { removeFromList(ids) }
+            }
+        }
+    }
+
+    private func removeFromList(_ ids: Set<UUID>) {
         files.removeAll { ids.contains($0.id) }
         selection.subtract(ids)
     }
@@ -138,22 +169,24 @@ final class AppState {
     func saveSelected() { requestSave(selectedFiles) }
     func saveAll() { requestSave(files) }
 
-    func performSave(_ files: [FileItem], onlyWhereEmpty: Set<FieldKey>) {
-        isSaving = true
+    /// Writes the files one at a time in the background. Saves queue up behind each other.
+    /// The returned task finishes when this save is done.
+    @discardableResult
+    func performSave(_ files: [FileItem], onlyWhereEmpty: Set<FieldKey>) -> Task<Void, Never> {
+        saves.enqueue { await self.write(files, onlyWhereEmpty: onlyWhereEmpty) }
+    }
+
+    private func write(_ files: [FileItem], onlyWhereEmpty: Set<FieldKey>) async {
         var failed = 0
         for file in files {
             do {
-                try file.save(preserveModificationDate: preserveModificationDate, onlyWhereEmpty: onlyWhereEmpty)
+                try await file.save(preserveModificationDate: preserveModificationDate, onlyWhereEmpty: onlyWhereEmpty)
             } catch {
-                file.error = error.localizedDescription
                 failed += 1
             }
         }
-        isSaving = false
         let saved = files.count - failed
-        status = failed == 0
-            ? trPlural("Saved %d files", saved)
-            : tr("Saved %d, failed %d", saved, failed)
+        showStatus(failed == 0 ? trPlural("Saved %d files", saved) : tr("Saved %d, failed %d", saved, failed))
     }
 
     // MARK: Panels and dialogs
@@ -170,10 +203,13 @@ final class AppState {
         }
     }
 
-    /// Asks what to do with unsaved changes. Returns true when the caller may proceed.
-    func confirmDiscardingChanges(_ dirty: [FileItem]? = nil) -> Bool {
-        let dirty = dirty ?? dirtyFiles
-        guard !dirty.isEmpty else { return true }
+    enum UnsavedChangesDecision {
+        case save, discard, cancel
+    }
+
+    /// Asks what to do with unsaved changes in `dirty`. With nothing unsaved the answer is `.discard` without asking.
+    func askAboutUnsavedChanges(_ dirty: [FileItem]) -> UnsavedChangesDecision {
+        guard !dirty.isEmpty else { return .discard }
         let alert = NSAlert()
         alert.messageText = trPlural("Save changes to %d files?", dirty.count)
         alert.informativeText = tr("Your changes will be lost if you don't save them.")
@@ -181,18 +217,37 @@ final class AppState {
         alert.addButton(withTitle: tr("Cancel"))
         alert.addButton(withTitle: tr("Don't Save"))
         switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            performSave(dirty, onlyWhereEmpty: [])
-            return !dirty.contains(where: \.isDirty)
-        case .alertThirdButtonReturn:
-            return true
-        default:
-            return false
+        case .alertFirstButtonReturn: return .save
+        case .alertThirdButtonReturn: return .discard
+        default: return .cancel
+        }
+    }
+
+    /// Saves `dirty` and tells whether every file was written, so the caller may close them.
+    func saveBeforeClosing(_ dirty: [FileItem]) async -> Bool {
+        await performSave(dirty, onlyWhereEmpty: []).value
+        return !dirty.contains(where: \.isDirty)
+    }
+
+    /// Answer for NSApplicationDelegate.applicationShouldTerminate: asks about unsaved changes and saves them first if wanted.
+    func terminateReply() -> NSApplication.TerminateReply {
+        let dirty = dirtyFiles
+        switch askAboutUnsavedChanges(dirty) {
+        case .cancel:
+            return .terminateCancel
+        case .discard:
+            return .terminateNow
+        case .save:
+            Task {
+                NSApp.reply(toApplicationShouldTerminate: await saveBeforeClosing(dirty))
+            }
+            return .terminateLater
         }
     }
 }
 
 /// A multi-file save waiting for confirmation. See docs/batch-editing.md.
+@MainActor
 struct SaveRequest: Identifiable {
     let id = UUID()
     let files: [FileItem]

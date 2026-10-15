@@ -190,5 +190,8 @@ extension Translations {
         "A file named %@ already exists": "Файл с именем %@ уже существует",
         "Could not write %@: %@": "Не удалось записать %@: %@",
         "Could not remove %@: %@": "Не удалось удалить %@: %@",
+        "Could not rename %@: %@": "Не удалось переименовать %@: %@",
+        "%@ is not an image": "%@ — не изображение",
+        "Enter a whole number": "Введите целое число",
     ]
 }

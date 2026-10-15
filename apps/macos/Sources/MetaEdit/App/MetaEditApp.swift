@@ -34,10 +34,10 @@ struct MetaEditApp: App {
             CommandGroup(replacing: .saveItem) {
                 Button(tr("Save")) { state.saveSelected() }
                     .keyboardShortcut("s")
-                    .disabled(!state.selectionIsDirty)
+                    .disabled(!state.selectionIsDirty || state.isSaving)
                 Button(tr("Save All")) { state.saveAll() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
-                    .disabled(state.dirtyFiles.isEmpty)
+                    .disabled(state.dirtyFiles.isEmpty || state.isSaving)
                 Divider()
                 Button(tr("Revert Selected")) { state.revertSelected() }
                     .disabled(!state.selectionIsDirty)
@@ -64,7 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        AppState.shared.confirmDiscardingChanges() ? .terminateNow : .terminateCancel
+        AppState.shared.terminateReply()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

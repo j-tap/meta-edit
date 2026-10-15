@@ -190,5 +190,8 @@ extension Translations {
         "A file named %@ already exists": "已存在名为 %@ 的文件",
         "Could not write %@: %@": "无法写入 %@：%@",
         "Could not remove %@: %@": "无法移除 %@：%@",
+        "Could not rename %@: %@": "无法重命名 %@：%@",
+        "%@ is not an image": "%@ 不是图像",
+        "Enter a whole number": "请输入整数",
     ]
 }

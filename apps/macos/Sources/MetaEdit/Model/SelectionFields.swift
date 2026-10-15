@@ -69,6 +69,7 @@ struct FieldGroupState: Identifiable {
     var id: FieldGroup { group }
 }
 
+@MainActor
 enum SelectionFields {
     static func compute(_ files: [FileItem]) -> [FieldGroupState] {
         guard !files.isEmpty else { return [] }

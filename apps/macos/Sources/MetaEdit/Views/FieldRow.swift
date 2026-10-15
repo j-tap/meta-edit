@@ -36,8 +36,13 @@ struct FieldRow: View {
                 .padding(.top, 3)
         } else {
             switch field.spec.kind {
-            case .text, .integer:
+            case .text:
                 DraftTextField(value: currentText, prompt: prompt) { commitText($0) }
+            case .integer:
+                DraftTextField(value: currentText, prompt: prompt, isValid: Self.isWholeNumber) {
+                    commitText($0.trimmingCharacters(in: .whitespaces))
+                }
+                .help(tr("Enter a whole number"))
             case .list:
                 DraftTextField(value: currentText, prompt: prompt ?? Text(tr("Comma separated"))) { commitList($0) }
             case .lines:
@@ -129,6 +134,11 @@ struct FieldRow: View {
         .padding(.top, 4)
     }
 
+    private static func isWholeNumber(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty || Int(trimmed) != nil
+    }
+
     private func commitText(_ text: String) {
         if text.isEmpty {
             // Clearing a field whose values differ goes back to "multiple values" instead of deleting everywhere.
@@ -173,23 +183,36 @@ struct FieldRow: View {
 struct DraftTextField: View {
     let value: String
     let prompt: Text?
+    /// A draft that fails this check gets a red outline and is not passed on; leaving the field restores the value.
+    var isValid: (String) -> Bool = { _ in true }
     let onChange: (String) -> Void
     @ViewState private var draft = ""
+    @ViewState private var isInvalid = false
     @FocusState private var focused: Bool
 
     var body: some View {
         TextField("", text: $draft, prompt: prompt)
             .textFieldStyle(.roundedBorder)
+            .overlay {
+                if isInvalid {
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(.red)
+                }
+            }
             .focused($focused)
             .onAppear { draft = value }
             .onChange(of: value) { _, new in
                 if !focused { draft = new }
             }
             .onChange(of: draft) { _, new in
-                if focused, new != value { onChange(new) }
+                guard focused else { return }
+                isInvalid = !isValid(new)
+                if !isInvalid, new != value { onChange(new) }
             }
             .onChange(of: focused) { _, isFocused in
-                if !isFocused { draft = value }
+                if !isFocused {
+                    draft = value
+                    isInvalid = false
+                }
             }
     }
 }
@@ -311,7 +334,7 @@ struct CoverField: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isTargeted ? Color.accentColor : .clear, lineWidth: 2))
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }
-                return load(url)
+                return (try? load(url)) != nil
             } isTargeted: { isTargeted = $0 }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -335,19 +358,24 @@ struct CoverField: View {
         }
     }
 
-    private func load(_ url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url), NSImage(data: data) != nil else { return false }
+    private func load(_ url: URL) throws {
+        let data = try Data(contentsOf: url)
+        guard NSImage(data: data) != nil else {
+            throw MetadataError(tr("%@ is not an image", url.lastPathComponent))
+        }
         let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/jpeg"
         state.stage(.image(data, mime: mime), for: key, in: files)
-        return true
     }
 
     private func choose() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            _ = load(url)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try load(url)
+        } catch {
+            NSAlert(error: error).runModal()
         }
     }
 
@@ -357,8 +385,11 @@ struct CoverField: View {
         let ext = UTType(mimeType: mime)?.preferredFilenameExtension ?? "jpg"
         let base = files.first?.url.deletingPathExtension().lastPathComponent ?? "cover"
         panel.nameFieldStringValue = "\(base).\(ext)"
-        if panel.runModal() == .OK, let url = panel.url {
-            try? data.write(to: url)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            NSAlert(error: error).runModal()
         }
     }
 }

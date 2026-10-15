@@ -190,5 +190,8 @@ extension Translations {
         "A file named %@ already exists": "Ya existe un archivo llamado %@",
         "Could not write %@: %@": "No se pudo escribir %@: %@",
         "Could not remove %@: %@": "No se pudo eliminar %@: %@",
+        "Could not rename %@: %@": "No se pudo cambiar el nombre de %@: %@",
+        "%@ is not an image": "%@ no es una imagen",
+        "Enter a whole number": "Introduce un número entero",
     ]
 }

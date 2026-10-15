@@ -5,6 +5,10 @@ import UniformTypeIdentifiers
 final class FileAttributesProvider: MetadataProvider {
     static let providerID = "file"
     static let nameKey = FieldKey(provider: providerID, id: "name")
+    static let createdKey = FieldKey(provider: providerID, id: "created")
+    static let modifiedKey = FieldKey(provider: providerID, id: "modified")
+    /// Fields that set file dates explicitly, so saving must not restore the old modification date.
+    static let dateKeys: Set<FieldKey> = [createdKey, modifiedKey]
 
     let id = FileAttributesProvider.providerID
 
@@ -34,8 +38,8 @@ final class FileAttributesProvider: MetadataProvider {
             FieldSpec(key: key("whereFrom"), label: "Where from", group: .file, kind: .lines, order: 3),
             .list(Xattr.plist(url, Self.whereFromsAttribute) as? [String] ?? [])
         )
-        data.add(FieldSpec(key: key("created"), label: "Created", group: .file, kind: .date, order: 4), values.creationDate.map(FieldValue.date))
-        data.add(FieldSpec(key: key("modified"), label: "Modified", group: .file, kind: .date, order: 5), values.contentModificationDate.map(FieldValue.date))
+        data.add(FieldSpec(key: Self.createdKey, label: "Created", group: .file, kind: .date, order: 4), values.creationDate.map(FieldValue.date))
+        data.add(FieldSpec(key: Self.modifiedKey, label: "Modified", group: .file, kind: .date, order: 5), values.contentModificationDate.map(FieldValue.date))
 
         data.add(
             FieldSpec(key: key("path"), label: "Folder", group: .technical, kind: .text, writable: false, order: 1000),
@@ -59,12 +63,12 @@ final class FileAttributesProvider: MetadataProvider {
         for (fieldKey, entry) in changes {
             let value: FieldValue? = entry
             switch fieldKey.id {
-            case "created":
+            case Self.createdKey.id:
                 if case .date(let date)? = value {
                     resourceValues.creationDate = date
                     touched = true
                 }
-            case "modified":
+            case Self.modifiedKey.id:
                 if case .date(let date)? = value {
                     resourceValues.contentModificationDate = date
                     touched = true
@@ -91,14 +95,34 @@ final class FileAttributesProvider: MetadataProvider {
             }
             let destination = url.deletingLastPathComponent().appendingPathComponent(trimmed)
             if destination.path != url.path {
-                guard !FileManager.default.fileExists(atPath: destination.path) else {
-                    throw MetadataError(tr("A file named %@ already exists", trimmed))
-                }
-                try FileManager.default.moveItem(at: url, to: destination)
+                try rename(url, to: destination)
                 target = destination
             }
         }
         return target
+    }
+
+    private func rename(_ url: URL, to destination: URL) throws {
+        if Self.isSameFile(url, destination) {
+            // Only the letter case changes. On a case-insensitive volume the destination "exists" as this very
+            // file, so the existence check below would refuse the rename; rename(2) handles it.
+            guard Foundation.rename(url.path, destination.path) == 0 else {
+                throw MetadataError(tr("Could not rename %@: %@", url.lastPathComponent, String(cString: strerror(errno))))
+            }
+            return
+        }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw MetadataError(tr("A file named %@ already exists", destination.lastPathComponent))
+        }
+        try FileManager.default.moveItem(at: url, to: destination)
+    }
+
+    private static func isSameFile(_ a: URL, _ b: URL) -> Bool {
+        func identifier(_ url: URL) -> (any NSObjectProtocol)? {
+            (try? url.resourceValues(forKeys: [.fileResourceIdentifierKey]))?.fileResourceIdentifier
+        }
+        guard let first = identifier(a), let second = identifier(b) else { return false }
+        return first.isEqual(second)
     }
 
     /// Finder stores tags as "Name\nColour" strings. Colours of kept tags are preserved; the

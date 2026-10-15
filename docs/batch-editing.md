@@ -22,6 +22,7 @@ than one file is selected.
 - Clearing a field that had one common value stages removal of the tag. Clearing a mixed field returns it to "Multiple values";
   the separate remove button next to it removes the field from every selected file.
 - Cover: a mixed cover shows a stacked placeholder. Dropping or choosing an image sets it for all selected files; Remove removes it from all.
+  The cover is the first embedded picture; other pictures (back cover, booklet) are kept when it is replaced or removed.
 - A staged value can be limited to files where the field is currently empty: "Only where empty", offered per field in the confirmation dialog, off by default.
 - Lists (keywords, tags) in a mixed state offer "Add to all" for appending without replacing existing items (planned).
 - General fields (title, artist, keywords, ...) are shared across file types: one Keywords row edits ID3, Vorbis, MP4 and XMP keywords alike.
@@ -40,7 +41,9 @@ than one file is selected.
   for example "Genre = Rock, 12 files", with an expandable file list and the per-field "Only where empty" checkbox.
   The primary button says "Change 12 files".
 - Writes run one file at a time with a progress indicator; the list stays browsable.
-- Each file is re-read after writing. Success clears its staged changes; failure keeps them and shows the error next to the file,
+- Saves queue up: a second save starts when the first is done. Adding files is queued the same way, so overlapping adds never add a file twice.
+- Each file is re-read after writing. Success clears its staged changes (edits made while the write ran stay staged);
+  failure keeps the changes the file does not hold yet and shows the error next to the file,
   with Retry and Show details. Other files continue.
 - Saving never renames files except through the `name` field, which is single-file only.
 

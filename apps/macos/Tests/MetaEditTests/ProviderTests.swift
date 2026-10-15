@@ -1,10 +1,12 @@
 import CoreGraphics
+import CTagLib
 import Foundation
 import ImageIO
 import Testing
 @testable import MetaEdit
 
 @Suite(.serialized)
+@MainActor
 final class ProviderTests {
     static let fixtures = Bundle.module.resourceURL!.appendingPathComponent("Fixtures")
     private let tempDir: URL
@@ -68,7 +70,7 @@ final class ProviderTests {
 
     // MARK: Audio and video containers
 
-    @Test func readsMP3Tags() throws {
+    @Test func readsMP3Tags() async throws {
         let item = load(try copy("sample.mp3"))
         #expect(item.error == nil)
         #expect(item.values[key("general", "title")] == .text("Sine MP3"))
@@ -79,7 +81,7 @@ final class ProviderTests {
         #expect(item.values[key("file", "name")] != nil)
     }
 
-    @Test func audioRoundTrip() throws {
+    @Test func audioRoundTrip() async throws {
         let cover = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.png"))
         for name in ["sample.mp3", "sample.flac", "sample.ogg", "sample.opus", "sample.m4a", "sample.wav", "sample.aiff", "sample.mp4", "sample.mkv"] {
             let url = try copy(name)
@@ -99,7 +101,7 @@ final class ProviderTests {
             }
             for (id, value) in edits { item.stage(value, for: key("general", id)) }
             #expect(item.isDirty, Comment(rawValue: name))
-            try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+            try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
             #expect(item.error == nil, Comment(rawValue: name))
             #expect(!(item.isDirty), Comment(rawValue: name))
             for (id, value) in edits where id != "cover" {
@@ -114,7 +116,7 @@ final class ProviderTests {
         }
     }
 
-    @Test func fieldsDependOnFileType() throws {
+    @Test func fieldsDependOnFileType() async throws {
         let mp3 = load(try copy("sample.mp3"))
         #expect(mp3.supports(key("general", "album")))
         #expect(mp3.supports(key("taglib", "lyrics")))
@@ -148,20 +150,19 @@ final class ProviderTests {
         #expect(txt.supports(key("file", "whereFrom")))
     }
 
-    @Test func videoShowFieldsRoundTrip() throws {
+    @Test func videoShowFieldsRoundTrip() async throws {
         let item = load(try copy("sample.mp4"))
         item.stage(.text("Series"), for: key("taglib", "show"))
         item.stage(.text("2"), for: key("taglib", "season"))
         item.stage(.text("5"), for: key("taglib", "episode"))
-        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         #expect(item.error == nil)
         #expect(item.values[key("taglib", "show")] == .text("Series"))
         #expect(item.values[key("taglib", "season")] == .text("2"))
         #expect(item.values[key("taglib", "episode")] == .text("5"))
     }
 
-    @MainActor
-    @Test func mixedSelectionJoinsDifferentLabels() throws {
+    @Test func mixedSelectionJoinsDifferentLabels() async throws {
         let fields = SelectionFields.compute([load(try copy("sample.mp3")), load(try copy("sample.jpg"))]).flatMap(\.fields)
         let artist = fields.first { $0.id == key("general", "artist") }
         #expect(artist?.label == tr("Artist") + " / " + tr("Author"))
@@ -170,31 +171,85 @@ final class ProviderTests {
         #expect(album?.supportCount == 1)
     }
 
-    @Test func removingTagsAndCover() throws {
+    @Test func removingTagsAndCover() async throws {
         let url = try copy("sample.mp3")
         let item = load(url)
         item.stage(nil, for: key("general", "title"))
         item.stage(nil, for: key("general", "genre"))
-        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         #expect(item.values[key("general", "title")] == nil)
         #expect(item.values[key("general", "genre")] == nil)
         #expect(item.values[key("general", "artist")] == .text("Sample Artist"))
     }
 
-    @Test func preservesModificationDate() throws {
+    @Test func coverChangeKeepsOtherPictures() async throws {
+        let url = try copy("sample.mp3")
+        let front = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.png"))
+        let back = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.jpg"))
+        let item = load(url)
+        item.stage(.image(front, mime: "image/png"), for: key("general", "cover"))
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try appendPicture(back, mime: "image/jpeg", type: "Back Cover", to: url)
+        #expect(try pictureTypes(url) == ["Front Cover", "Back Cover"])
+
+        // Replacing the cover keeps the back cover.
+        item.load()
+        item.stage(.image(back, mime: "image/jpeg"), for: key("general", "cover"))
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        #expect(try pictureTypes(url) == ["Front Cover", "Back Cover"])
+        #expect(item.values[key("general", "cover")] == .image(back, mime: "image/jpeg"))
+
+        // Removing the cover removes only the first picture.
+        item.stage(nil, for: key("general", "cover"))
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        #expect(try pictureTypes(url) == ["Back Cover"])
+    }
+
+    private func appendPicture(_ data: Data, mime: String, type: String, to url: URL) throws {
+        let file = try #require(taglib_file_new(url.path))
+        defer { taglib_file_free(file) }
+        let appended = TagLibProvider.withPictureAttributes(data: data, mime: mime, type: type) {
+            taglib_complex_property_set_append(file, "PICTURE", $0) != 0
+        }
+        #expect(appended)
+        #expect(taglib_file_save(file) != 0)
+    }
+
+    /// Picture types of every embedded picture, in file order.
+    private func pictureTypes(_ url: URL) throws -> [String] {
+        let file = try #require(taglib_file_new(url.path))
+        defer { taglib_file_free(file) }
+        guard let pictures = taglib_complex_property_get(file, "PICTURE") else { return [] }
+        defer { taglib_complex_property_free(pictures) }
+        var types: [String] = []
+        var index = 0
+        while let picture = pictures[index] {
+            var attribute = 0
+            while let entry = picture[attribute] {
+                if String(cString: entry.pointee.key) == "pictureType" {
+                    types.append(String(cString: entry.pointee.value.value.stringValue))
+                }
+                attribute += 1
+            }
+            index += 1
+        }
+        return types
+    }
+
+    @Test func preservesModificationDate() async throws {
         let url = try copy("sample.flac")
         let past = Date(timeIntervalSince1970: 1_000_000_000)
         try FileManager.default.setAttributes([.modificationDate: past], ofItemAtPath: url.path)
         let item = load(url)
         item.stage(.text("T"), for: key("general", "title"))
-        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         let modified = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate!
         #expect(abs((modified.timeIntervalSince1970) - (past.timeIntervalSince1970)) <= 1)
     }
 
     // MARK: Images
 
-    @Test func imageRoundTrip() throws {
+    @Test func imageRoundTrip() async throws {
         for name in ["sample.jpg", "sample.png", "sample.tiff", "sample.heic"] {
             let url = try copy(name)
             let before = try pixels(url)
@@ -209,7 +264,7 @@ final class ProviderTests {
                 let provider = ["city"].contains(id) ? "imageio" : "general"
                 item.stage(value, for: key(provider, id))
             }
-            try item.save(preserveModificationDate: false, onlyWhereEmpty: [])
+            try await item.save(preserveModificationDate: false, onlyWhereEmpty: [])
             #expect(item.error == nil, Comment(rawValue: name))
             for (id, value) in edits {
                 let provider = ["city"].contains(id) ? "imageio" : "general"
@@ -218,13 +273,13 @@ final class ProviderTests {
             #expect(try pixels(url) == before, "\(name): pixels changed")
 
             item.stage(nil, for: key("imageio", "city"))
-            try item.save(preserveModificationDate: false, onlyWhereEmpty: [])
+            try await item.save(preserveModificationDate: false, onlyWhereEmpty: [])
             #expect(item.values[key("imageio", "city")] == nil, Comment(rawValue: name))
             #expect(item.values[key("general", "title")] == .text("Photo title"), Comment(rawValue: name))
         }
     }
 
-    @Test func richJPEGKeepsExifAndIPTC() throws {
+    @Test func richJPEGKeepsExifAndIPTC() async throws {
         let url = try copy("rich.jpg")
         let item = load(url)
         #expect(item.values[key("general", "title")] == .text("IPTC title"))
@@ -235,7 +290,7 @@ final class ProviderTests {
         #expect(item.values[key("imageio", "lens")] == .text("RF 50mm"))
 
         item.stage(.text("Edited title"), for: key("general", "title"))
-        try item.save(preserveModificationDate: false, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: false, onlyWhereEmpty: [])
         #expect(item.error == nil)
         #expect(item.values[key("general", "title")] == .text("Edited title"))
         #expect(item.values[key("general", "description")] == .text("Exif description"))
@@ -253,14 +308,14 @@ final class ProviderTests {
 
     // MARK: File attributes
 
-    @Test func fileAttributesAndRename() throws {
+    @Test func fileAttributesAndRename() async throws {
         let url = try copy("sample.txt")
         let item = load(url)
         #expect(item.error == nil)
         item.stage(.list(["Red", "Project"]), for: key("file", "tags"))
         item.stage(.text("A Finder comment"), for: key("file", "comment"))
         item.stage(.list(["https://example.com/a"]), for: key("file", "whereFrom"))
-        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         #expect(item.error == nil)
         #expect(item.values[key("file", "tags")] == .list(["Red", "Project"]))
         #expect(item.values[key("file", "comment")] == .text("A Finder comment"))
@@ -268,20 +323,49 @@ final class ProviderTests {
         #expect(Xattr.plist(url, "com.apple.metadata:_kMDItemUserTags") as? [String] == ["Red\n6", "Project"])
 
         item.stage(.text("renamed.txt"), for: FileAttributesProvider.nameKey)
-        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         #expect(item.url.lastPathComponent == "renamed.txt")
         #expect(FileManager.default.fileExists(atPath: item.url.path))
         #expect(!(FileManager.default.fileExists(atPath: url.path)))
         #expect(item.values[key("file", "comment")] == .text("A Finder comment"))
     }
 
-    @Test func imageWriteKeepsWhereFrom() throws {
+    @Test func renameChangingOnlyLetterCase() async throws {
+        let url = try copy("sample.txt")
+        let item = load(url)
+        item.stage(.text("SAMPLE.txt"), for: FileAttributesProvider.nameKey)
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        #expect(item.error == nil)
+        #expect(item.url.lastPathComponent == "SAMPLE.txt")
+        let names = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+        #expect(names.contains("SAMPLE.txt"))
+        #expect(!names.contains("sample.txt"))
+    }
+
+    @Test func failedSaveRereadsTheFile() async throws {
+        let url = try copy("sample.mp3")
+        _ = try copy("sample.txt")
+        let item = load(url)
+        let title = key("general", "title")
+        item.stage(.text("Written"), for: title)
+        item.stage(.text("sample.txt"), for: FileAttributesProvider.nameKey)
+        await #expect(throws: MetadataError.self) {
+            try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        }
+        // TagLib wrote the title before the rename failed: it is on disk now and no longer staged.
+        #expect(item.values[title] == .text("Written"))
+        #expect(item.staged[title] == nil)
+        #expect(item.staged[FileAttributesProvider.nameKey] == .some(.text("sample.txt")))
+        #expect(item.error != nil)
+    }
+
+    @Test func imageWriteKeepsWhereFrom() async throws {
         let url = try copy("sample.jpg")
         let item = load(url)
         item.stage(.list(["https://example.com/a,b?c=1", "https://example.com/"]), for: key("file", "whereFrom"))
-        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         item.stage(.text("New title"), for: key("general", "title"))
-        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         #expect(item.error == nil)
         #expect(item.values[key("file", "whereFrom")] == .list(["https://example.com/a,b?c=1", "https://example.com/"]))
         #expect(item.spec(for: key("file", "whereFrom"))?.kind == .lines)
@@ -289,7 +373,7 @@ final class ProviderTests {
 
     // MARK: Localization
 
-    @Test func translationsAreComplete() throws {
+    @Test func translationsAreComplete() async throws {
         // Every English string the sources pass to tr() or use as a field label must be translated.
         let sources = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -348,8 +432,7 @@ final class ProviderTests {
 
     // MARK: Batch editing
 
-    @MainActor
-    @Test func batchMixedValuesAndOnlyWhereEmpty() throws {
+    @Test func batchMixedValuesAndOnlyWhereEmpty() async throws {
         let a = load(try copy("sample.mp3"))
         let b = load(try copy("sample.flac"))
         let title = key("general", "title")
@@ -368,14 +451,30 @@ final class ProviderTests {
         #expect(field(genre).pending == .uniform(.text("Rock")))
         #expect(!(field(genre).isMixed))
 
-        state.performSave([a, b], onlyWhereEmpty: [genre])
+        await state.performSave([a, b], onlyWhereEmpty: [genre]).value
         #expect(a.values[genre] == .text("Test"))
         #expect(b.values[genre] == .text("Rock"))
         #expect(!(a.isDirty))
         #expect(!(b.isDirty))
 
         state.stage(.text("Same"), for: title, in: [a, b])
-        state.performSave([a, b], onlyWhereEmpty: [])
+        await state.performSave([a, b], onlyWhereEmpty: []).value
         #expect(field(title).original == .same(.text("Same")))
+    }
+
+    // MARK: Adding files
+
+    @Test func overlappingAddsDoNotDuplicate() async throws {
+        let mp3 = try copy("sample.mp3")
+        let flac = try copy("sample.flac")
+        let state = AppState()
+        let first = state.addURLs([mp3, flac])
+        let second = state.addURLs([tempDir])
+        #expect(state.isLoading)
+        await first.value
+        await second.value
+        #expect(!state.isLoading)
+        #expect(state.files.count == 2)
+        #expect(Set(state.files.map(\.name)) == ["sample.mp3", "sample.flac"])
     }
 }

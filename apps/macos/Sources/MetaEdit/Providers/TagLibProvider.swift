@@ -14,6 +14,8 @@ final class TagLibProvider: MetadataProvider {
 
     private static let videoExtensions: Set<String> = ["mp4", "m4v", "3g2", "3gp", "mkv", "webm"]
 
+    private static let pictureKey = "PICTURE"
+
     private enum Family { case id3, vorbis, mp4, ape, asf, matroska, other }
 
     private struct Mapping {
@@ -127,10 +129,7 @@ final class TagLibProvider: MetadataProvider {
         guard let file = taglib_file_new(url.path) else {
             throw MetadataError(tr("TagLib could not open %@", url.lastPathComponent))
         }
-        defer {
-            taglib_file_free(file)
-            taglib_tag_free_strings()
-        }
+        defer { taglib_file_free(file) }
         guard taglib_file_is_valid(file) != 0 else {
             throw MetadataError(tr("Unsupported or damaged media file"))
         }
@@ -225,7 +224,7 @@ final class TagLibProvider: MetadataProvider {
     }
 
     private func readPicture(_ file: UnsafeMutablePointer<TagLib_File>) -> FieldValue? {
-        guard let properties = taglib_complex_property_get(file, "PICTURE") else { return nil }
+        guard let properties = taglib_complex_property_get(file, Self.pictureKey) else { return nil }
         defer { taglib_complex_property_free(properties) }
         var picture = TagLib_Complex_Property_Picture_Data()
         taglib_picture_from_complex_property(properties, &picture)
@@ -241,10 +240,7 @@ final class TagLibProvider: MetadataProvider {
         guard let file = taglib_file_new(url.path) else {
             throw MetadataError(tr("TagLib could not open %@", url.lastPathComponent))
         }
-        defer {
-            taglib_file_free(file)
-            taglib_tag_free_strings()
-        }
+        defer { taglib_file_free(file) }
         guard taglib_file_is_valid(file) != 0 else {
             throw MetadataError(tr("Unsupported or damaged media file"))
         }
@@ -302,26 +298,71 @@ final class TagLibProvider: MetadataProvider {
         }
     }
 
+    typealias PictureAttributes = UnsafeMutablePointer<UnsafePointer<TagLib_Complex_Property_Attribute>?>
+
+    /// Replaces the first embedded picture, the one shown as the cover, or removes it when `value` is nil.
+    /// Other pictures (back cover, booklet pages) are kept.
     private func setPicture(_ file: UnsafeMutablePointer<TagLib_File>, _ value: FieldValue?) throws {
-        guard case .image(let data, let mime)? = value, !data.isEmpty else {
-            guard taglib_complex_property_set(file, "PICTURE", nil) != 0 else {
-                throw MetadataError(tr("Could not remove the cover"))
-            }
-            return
+        let existing = taglib_complex_property_get(file, Self.pictureKey)
+        defer { if let existing { taglib_complex_property_free(existing) } }
+        let others = Self.pictures(in: existing).dropFirst()
+
+        // TagLib copies the attributes on every call, so the existing list can be freed afterwards.
+        var isFirst = true
+        func store(_ picture: PictureAttributes) -> Bool {
+            defer { isFirst = false }
+            if isFirst { return taglib_complex_property_set(file, Self.pictureKey, picture) != 0 }
+            return taglib_complex_property_set_append(file, Self.pictureKey, picture) != 0
         }
+
+        var ok = true
+        let cover: (data: Data, mime: String)?
+        if case .image(let data, let mime)? = value, !data.isEmpty { cover = (data, mime) } else { cover = nil }
+        if let cover {
+            ok = Self.withPictureAttributes(data: cover.data, mime: cover.mime, body: store)
+        }
+        for picture in others where ok {
+            ok = store(picture)
+        }
+        if ok, isFirst {
+            ok = taglib_complex_property_set(file, Self.pictureKey, nil) != 0
+        }
+        guard ok else {
+            throw MetadataError(cover == nil ? tr("Could not remove the cover") : tr("Could not set the cover"))
+        }
+    }
+
+    /// Entries of a list returned by taglib_complex_property_get, typed for passing back to the setters.
+    private static func pictures(
+        in list: UnsafeMutablePointer<UnsafeMutablePointer<UnsafeMutablePointer<TagLib_Complex_Property_Attribute>?>?>?
+    ) -> [PictureAttributes] {
+        guard let list else { return [] }
+        var result: [PictureAttributes] = []
+        var index = 0
+        while let entry = list[index] {
+            result.append(UnsafeMutableRawPointer(entry).assumingMemoryBound(to: UnsafePointer<TagLib_Complex_Property_Attribute>?.self))
+            index += 1
+        }
+        return result
+    }
+
+    /// Calls `body` with the attributes of a picture made from `data`, as TagLib's PICTURE setters take them.
+    static func withPictureAttributes<Result>(
+        data: Data, mime: String, type: String = "Front Cover", body: (PictureAttributes) -> Result
+    ) -> Result {
         let bytes = UnsafeMutablePointer<CChar>.allocate(capacity: data.count)
         data.withUnsafeBytes { raw in
             _ = memcpy(bytes, raw.baseAddress!, data.count)
         }
         let keys = ["data", "mimeType", "description", "pictureType"].map { (name: String) in strdup(name)! }
-        let strings = [strdup(mime)!, strdup("")!, strdup("Front Cover")!]
+        let strings = [strdup(mime)!, strdup("")!, strdup(type)!]
         defer {
             bytes.deallocate()
             keys.forEach { free($0) }
             strings.forEach { free($0) }
         }
 
-        var attributes = [TagLib_Complex_Property_Attribute](repeating: TagLib_Complex_Property_Attribute(), count: 4)
+        var attributes = [TagLib_Complex_Property_Attribute](repeating: TagLib_Complex_Property_Attribute(), count: keys.count)
         attributes[0].key = keys[0]
         attributes[0].value.type = TagLib_Variant_ByteVector
         attributes[0].value.size = UInt32(data.count)
@@ -331,13 +372,10 @@ final class TagLibProvider: MetadataProvider {
             attributes[index + 1].value.type = TagLib_Variant_String
             attributes[index + 1].value.value.stringValue = string
         }
-        let ok: Bool = attributes.withUnsafeBufferPointer { buffer in
-            var pointers: [UnsafePointer<TagLib_Complex_Property_Attribute>?] = (0..<4).map { buffer.baseAddress! + $0 }
+        return attributes.withUnsafeBufferPointer { buffer in
+            var pointers: [UnsafePointer<TagLib_Complex_Property_Attribute>?] = buffer.indices.map { buffer.baseAddress! + $0 }
             pointers.append(nil)
-            return pointers.withUnsafeMutableBufferPointer { pointerBuffer in
-                taglib_complex_property_set(file, "PICTURE", pointerBuffer.baseAddress) != 0
-            }
+            return pointers.withUnsafeMutableBufferPointer { body($0.baseAddress!) }
         }
-        guard ok else { throw MetadataError(tr("Could not set the cover")) }
     }
 }
