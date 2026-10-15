@@ -11,11 +11,11 @@ struct FieldRow: View {
     private var key: FieldKey { field.spec.key }
     private var isEditable: Bool { field.spec.writable && files.allSatisfy(\.isWritable) }
     private var currentText: String { field.displayValue?.displayText ?? "" }
-    private var prompt: Text? { field.isMixed ? Text("Multiple values").italic() : nil }
+    private var prompt: Text? { field.isMixed ? Text(tr("Multiple values")).italic() : nil }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(field.spec.label)
+            Text(field.label)
                 .frame(width: 130, alignment: .trailing)
                 .foregroundStyle(.secondary)
                 .padding(.top, 3)
@@ -29,7 +29,7 @@ struct FieldRow: View {
     @ViewBuilder
     private var control: some View {
         if !isEditable {
-            Text(field.isMixed ? "Multiple values" : currentText)
+            Text(field.isMixed ? tr("Multiple values") : currentText)
                 .textSelection(.enabled)
                 .foregroundStyle(field.isMixed ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -39,9 +39,11 @@ struct FieldRow: View {
             case .text, .integer:
                 DraftTextField(value: currentText, prompt: prompt) { commitText($0) }
             case .list:
-                DraftTextField(value: currentText, prompt: prompt ?? Text("Comma separated")) { commitList($0) }
+                DraftTextField(value: currentText, prompt: prompt ?? Text(tr("Comma separated"))) { commitList($0) }
+            case .lines:
+                DraftTextEditor(value: linesText, placeholder: field.isMixed ? tr("Multiple values") : tr("One per line")) { commitLines($0) }
             case .multiline:
-                DraftTextEditor(value: currentText, placeholder: field.isMixed ? "Multiple values" : "") { commitText($0) }
+                DraftTextEditor(value: currentText, placeholder: field.isMixed ? tr("Multiple values") : "") { commitText($0) }
             case .boolean:
                 boolControl
             case .date:
@@ -64,9 +66,9 @@ struct FieldRow: View {
             .labelsHidden()
             .toggleStyle(.checkbox)
             if field.isMixed {
-                Text("Multiple values").italic().foregroundStyle(.secondary)
+                Text(tr("Multiple values")).italic().foregroundStyle(.secondary)
             } else if field.displayValue == nil {
-                Text("Not set").foregroundStyle(.tertiary)
+                Text(tr("Not set")).foregroundStyle(.tertiary)
             }
         }
         .padding(.top, 3)
@@ -82,7 +84,7 @@ struct FieldRow: View {
             )
             .labelsHidden()
         } else {
-            Button(field.isMixed ? "Set the same date for all" : "Set date") {
+            Button(field.isMixed ? tr("Set the same date for all") : tr("Set date")) {
                 state.stage(.date(Date()), for: key, in: files)
             }
         }
@@ -95,14 +97,14 @@ struct FieldRow: View {
                     Image(systemName: "arrow.uturn.backward.circle.fill").foregroundStyle(.orange)
                 }
                 .buttonStyle(.plain)
-                .help("Revert this field")
+                .help(tr("Revert this field"))
             }
             if field.isMixed, !field.mixedValues.isEmpty {
                 Button { showValues.toggle() } label: {
                     Image(systemName: "info.circle")
                 }
                 .buttonStyle(.plain)
-                .help("Values differ between the selected files")
+                .help(tr("Values differ between the selected files"))
                 .popover(isPresented: $showValues) {
                     MixedValuesPopover(values: field.mixedValues) { chosen in
                         state.stage(chosen, for: key, in: files)
@@ -115,13 +117,13 @@ struct FieldRow: View {
                     Image(systemName: "xmark.circle")
                 }
                 .buttonStyle(.plain)
-                .help("Remove this field from all selected files")
+                .help(tr("Remove this field from all selected files"))
             }
             if field.supportCount < field.total {
                 Text("\(field.supportCount)/\(field.total)")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .help("Available in \(field.supportCount) of \(field.total) selected files")
+                    .help(tr("Available in %d of %d selected files", field.supportCount, field.total))
             }
         }
         .padding(.top, 4)
@@ -140,8 +142,21 @@ struct FieldRow: View {
         }
     }
 
+    private var linesText: String {
+        if case .list(let items)? = field.displayValue { return items.joined(separator: "\n") }
+        return currentText
+    }
+
     private func commitList(_ text: String) {
-        let items = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        commitItems(text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
+    }
+
+    private func commitLines(_ text: String) {
+        commitItems(text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) })
+    }
+
+    private func commitItems(_ items: [String]) {
+        let items = items.filter { !$0.isEmpty }
         if items.isEmpty {
             if case .mixed = field.original {
                 state.revert(key, in: files)
@@ -224,7 +239,7 @@ struct MixedValuesPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Values in the selected files")
+            Text(tr("Values in the selected files"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ForEach(Array(values.prefix(10).enumerated()), id: \.offset) { _, entry in
@@ -232,7 +247,7 @@ struct MixedValuesPopover: View {
                     onPick(entry.value)
                 } label: {
                     HStack {
-                        Text(entry.value?.displayText ?? "(empty)")
+                        Text(entry.value?.displayText ?? tr("(empty)"))
                             .lineLimit(1)
                             .foregroundStyle(entry.value == nil ? .secondary : .primary)
                         Spacer()
@@ -244,11 +259,11 @@ struct MixedValuesPopover: View {
                 .buttonStyle(.plain)
             }
             if values.count > 10 {
-                Text("and \(values.count - 10) more")
+                Text(tr("and %d more", values.count - 10))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text("Click a value to use it for all selected files.")
+            Text(tr("Click a value to use it for all selected files."))
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -300,17 +315,17 @@ struct CoverField: View {
             } isTargeted: { isTargeted = $0 }
 
             VStack(alignment: .leading, spacing: 6) {
-                Button("Choose…") { choose() }
-                Button("Remove") { state.stage(nil, for: key, in: files) }
+                Button(tr("Choose…")) { choose() }
+                Button(tr("Remove")) { state.stage(nil, for: key, in: files) }
                     .disabled(!anyHasCover)
-                Button("Export…") { export() }
+                Button(tr("Export…")) { export() }
                     .disabled(image == nil)
                 if let image, let rep = image.representations.first {
                     Text("\(rep.pixelsWide) × \(rep.pixelsHigh)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if field.isMixed {
-                    Text("Covers differ")
+                    Text(tr("Covers differ"))
                         .font(.caption)
                         .italic()
                         .foregroundStyle(.secondary)

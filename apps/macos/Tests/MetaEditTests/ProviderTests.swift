@@ -86,11 +86,17 @@ final class ProviderTests {
             let before = try decodedDigest(url)
             let item = load(url)
             #expect(item.error == nil, Comment(rawValue: name))
-            let edits: [(String, FieldValue)] = [
-                ("title", .text("New Title")), ("artist", .text("New Artist")), ("album", .text("Album X")),
-                ("genre", .text("Jazz")), ("track", .text("3/12")), ("comment", .text("Hello\nWorld")),
-                ("keywords", .list(["one", "two"])), ("cover", .image(cover, mime: "image/png")),
+            let isVideo = ["sample.mp4", "sample.mkv"].contains(name)
+            var edits: [(String, FieldValue)] = [
+                ("title", .text("New Title")), ("artist", .text("New Artist")), ("genre", .text("Jazz")),
+                ("comment", .text("Hello\nWorld")), ("cover", .image(cover, mime: "image/png")),
             ]
+            edits += isVideo
+                ? [("description", .text("About this video"))]
+                : [("album", .text("Album X")), ("track", .text("3/12"))]
+            for (id, _) in edits {
+                #expect(item.supports(key("general", id)), "\(name) \(id)")
+            }
             for (id, value) in edits { item.stage(value, for: key("general", id)) }
             #expect(item.isDirty, Comment(rawValue: name))
             try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
@@ -106,6 +112,62 @@ final class ProviderTests {
             }
             #expect(try decodedDigest(url) == before, "\(name): decoded stream changed")
         }
+    }
+
+    @Test func fieldsDependOnFileType() throws {
+        let mp3 = load(try copy("sample.mp3"))
+        #expect(mp3.supports(key("general", "album")))
+        #expect(mp3.supports(key("taglib", "lyrics")))
+        #expect(!mp3.supports(key("general", "description")))
+        #expect(!mp3.supports(key("general", "keywords")))
+        #expect(!mp3.supports(key("taglib", "show")))
+        #expect(mp3.spec(for: key("general", "artist"))?.label == "Artist")
+        #expect(mp3.spec(for: key("general", "date"))?.label == "Year")
+
+        let mp4 = load(try copy("sample.mp4"))
+        #expect(mp4.supports(key("general", "description")))
+        #expect(mp4.supports(key("taglib", "show")))
+        #expect(!mp4.supports(key("general", "album")))
+        #expect(!mp4.supports(key("general", "track")))
+        #expect(!mp4.supports(key("taglib", "lyrics")))
+        #expect(mp4.spec(for: key("general", "artist"))?.label == "Author")
+
+        let mkv = load(try copy("sample.mkv"))
+        #expect(mkv.supports(key("general", "description")))
+        #expect(!mkv.supports(key("taglib", "show")))
+
+        let png = load(try copy("sample.png"))
+        #expect(png.supports(key("general", "keywords")))
+        #expect(png.supports(key("imageio", "city")))
+        #expect(!png.supports(key("general", "album")))
+        #expect(!png.supports(key("general", "cover")))
+        #expect(png.spec(for: key("general", "date"))?.label == "Date created")
+
+        let txt = load(try copy("sample.txt"))
+        #expect(txt.specs.allSatisfy { $0.group == .file || $0.group == .technical })
+        #expect(txt.supports(key("file", "whereFrom")))
+    }
+
+    @Test func videoShowFieldsRoundTrip() throws {
+        let item = load(try copy("sample.mp4"))
+        item.stage(.text("Series"), for: key("taglib", "show"))
+        item.stage(.text("2"), for: key("taglib", "season"))
+        item.stage(.text("5"), for: key("taglib", "episode"))
+        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        #expect(item.error == nil)
+        #expect(item.values[key("taglib", "show")] == .text("Series"))
+        #expect(item.values[key("taglib", "season")] == .text("2"))
+        #expect(item.values[key("taglib", "episode")] == .text("5"))
+    }
+
+    @MainActor
+    @Test func mixedSelectionJoinsDifferentLabels() throws {
+        let fields = SelectionFields.compute([load(try copy("sample.mp3")), load(try copy("sample.jpg"))]).flatMap(\.fields)
+        let artist = fields.first { $0.id == key("general", "artist") }
+        #expect(artist?.label == tr("Artist") + " / " + tr("Author"))
+        #expect(artist?.supportCount == 2)
+        let album = fields.first { $0.id == key("general", "album") }
+        #expect(album?.supportCount == 1)
     }
 
     @Test func removingTagsAndCover() throws {
@@ -211,6 +273,77 @@ final class ProviderTests {
         #expect(FileManager.default.fileExists(atPath: item.url.path))
         #expect(!(FileManager.default.fileExists(atPath: url.path)))
         #expect(item.values[key("file", "comment")] == .text("A Finder comment"))
+    }
+
+    @Test func imageWriteKeepsWhereFrom() throws {
+        let url = try copy("sample.jpg")
+        let item = load(url)
+        item.stage(.list(["https://example.com/a,b?c=1", "https://example.com/"]), for: key("file", "whereFrom"))
+        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        item.stage(.text("New title"), for: key("general", "title"))
+        try item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        #expect(item.error == nil)
+        #expect(item.values[key("file", "whereFrom")] == .list(["https://example.com/a,b?c=1", "https://example.com/"]))
+        #expect(item.spec(for: key("file", "whereFrom"))?.kind == .lines)
+    }
+
+    // MARK: Localization
+
+    @Test func translationsAreComplete() throws {
+        // Every English string the sources pass to tr() or use as a field label must be translated.
+        let sources = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/MetaEdit")
+        let patterns = [
+            #"\btr\("((?:[^"\\]|\\.)*)""#,
+            #"\blabel: "([^"]+)""#,
+            #"\("[a-zA-Z]+", "([A-Z][^"]*)","#,
+        ]
+        // GeneralField returns its labels from a switch.
+        let labelPatterns = [#"return "([A-Z][^"]*)""#, #"\? "(Artist)" : "(Author)""#]
+        var keys = Set<String>()
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)!
+        for case let file as URL in files where file.pathExtension == "swift" && !file.path.contains("/Localization/Translations") {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for pattern in patterns + (file.lastPathComponent == "GeneralField.swift" ? labelPatterns : []) {
+                let regex = try NSRegularExpression(pattern: pattern)
+                for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    for index in 1..<match.numberOfRanges {
+                        if let range = Range(match.range(at: index), in: text) { keys.insert(String(text[range])) }
+                    }
+                }
+            }
+        }
+        keys.remove("")
+        #expect(keys.count > 150)
+        for language in [AppLanguage.ru, .es, .zhHans] {
+            let table = Translations.strings[language] ?? [:]
+            let missing = keys.subtracting(table.keys).sorted()
+            #expect(missing.isEmpty, "\(language.rawValue) misses \(missing)")
+            let unused = Set(table.keys).subtracting(keys).sorted()
+            #expect(unused.isEmpty, "\(language.rawValue) has unused \(unused)")
+            for (english, translated) in table {
+                let specifiers = { (s: String) in s.matches(of: #/%[@d]/#).map { String($0.output) } }
+                #expect(specifiers(english) == specifiers(translated), "\(language.rawValue): \(english)")
+            }
+        }
+        let pluralKeys = Set(Translations.enPlurals.keys)
+        let formCounts: [AppLanguage: Int] = [.en: 2, .ru: 3, .es: 2, .zhHans: 1]
+        for (language, count) in formCounts {
+            let table = Translations.plurals[language] ?? [:]
+            #expect(Set(table.keys) == pluralKeys, Comment(rawValue: language.rawValue))
+            #expect(table.values.allSatisfy { $0.count == count }, Comment(rawValue: language.rawValue))
+        }
+    }
+
+    @Test func russianPluralRules() {
+        let expected: [(Int, Int)] = [(1, 0), (2, 1), (4, 1), (5, 2), (11, 2), (12, 2), (14, 2), (21, 0), (22, 1), (25, 2), (111, 2), (101, 0)]
+        for (n, index) in expected {
+            #expect(Localizer.pluralIndex(n, .ru) == index, "\(n)")
+        }
+        #expect(Localizer.pluralIndex(1, .en) == 0)
+        #expect(Localizer.pluralIndex(0, .en) == 1)
+        #expect(Localizer.pluralIndex(7, .zhHans) == 0)
     }
 
     // MARK: Batch editing

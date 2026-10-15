@@ -11,32 +11,32 @@ struct SaveConfirmationView: View {
     var body: some View {
         let entries = request.entries
         VStack(alignment: .leading, spacing: 12) {
-            Text("Change \(request.files.count) files?")
+            Text(trPlural("Change %d files?", request.files.count))
                 .font(.title2.weight(.semibold))
-            Text("These fields will be written. Everything else in the files stays untouched.")
+            Text(tr("These fields will be written. Everything else in the files stays untouched."))
                 .foregroundStyle(.secondary)
             List(entries) { entry in
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.spec.label).fontWeight(.medium)
+                        Text(entry.spec.displayLabel).fontWeight(.medium)
                         Text(description(for: entry))
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
                     Spacer()
-                    Text("\(entry.count) file\(entry.count == 1 ? "" : "s")")
+                    Text(trPlural("%d files", entry.count))
                         .foregroundStyle(.secondary)
                     if entry.value != nil {
-                        Toggle("Only where empty", isOn: binding(for: entry.spec.key))
+                        Toggle(tr("Only where empty"), isOn: binding(for: entry.spec.key))
                             .toggleStyle(.checkbox)
                             .controlSize(.small)
-                            .help("Skip files that already have a value in this field")
+                            .help(tr("Skip files that already have a value in this field"))
                     }
                 }
                 .padding(.vertical, 2)
             }
             .frame(minHeight: 140, maxHeight: 280)
-            DisclosureGroup("Files", isExpanded: $showFiles) {
+            DisclosureGroup(tr("Files"), isExpanded: $showFiles) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
                         ForEach(request.files) { file in
@@ -49,9 +49,9 @@ struct SaveConfirmationView: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button(tr("Cancel")) { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Change \(request.files.count) files") {
+                Button(trPlural("Change %d files", request.files.count)) {
                     state.performSave(request.files, onlyWhereEmpty: onlyWhereEmpty)
                     dismiss()
                 }
@@ -63,8 +63,8 @@ struct SaveConfirmationView: View {
     }
 
     private func description(for entry: SaveRequest.Entry) -> String {
-        guard let value = entry.value else { return "Remove" }
-        return entry.isUniform ? value.displayText : "Different values per file"
+        guard let value = entry.value else { return tr("Remove") }
+        return entry.isUniform ? value.displayText : tr("Different values per file")
     }
 
     private func binding(for key: FieldKey) -> Binding<Bool> {

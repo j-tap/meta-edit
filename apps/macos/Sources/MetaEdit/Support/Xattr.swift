@@ -18,12 +18,12 @@ enum Xattr {
         if let data {
             let result = data.withUnsafeBytes { setxattr(path, name, $0.baseAddress, data.count, 0, 0) }
             guard result == 0 else {
-                throw MetadataError("Could not write \(name): \(String(cString: strerror(errno)))")
+                throw MetadataError(tr("Could not write %@: %@", name, String(cString: strerror(errno))))
             }
         } else {
             let result = removexattr(path, name, 0)
             guard result == 0 || errno == ENOATTR else {
-                throw MetadataError("Could not remove \(name): \(String(cString: strerror(errno)))")
+                throw MetadataError(tr("Could not remove %@: %@", name, String(cString: strerror(errno))))
             }
         }
     }

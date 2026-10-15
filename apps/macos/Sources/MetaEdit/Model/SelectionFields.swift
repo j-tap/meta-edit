@@ -23,6 +23,8 @@ enum PendingState: Equatable {
 /// One field as shown for the current selection. See docs/batch-editing.md.
 struct FieldState: Identifiable {
     let spec: FieldSpec
+    /// Translated label. A General field labelled differently per file type shows both, e.g. "Artist / Author".
+    let label: String
     let supportCount: Int
     let total: Int
     let original: OriginalState
@@ -72,6 +74,7 @@ enum SelectionFields {
         guard !files.isEmpty else { return [] }
         var specs: [FieldKey: FieldSpec] = [:]
         var order: [FieldKey] = []
+        var labels: [FieldKey: [String]] = [:]
         var originals: [FieldKey: [FieldValue?]] = [:]
         var staged: [FieldKey: [FieldValue??]] = [:]
 
@@ -81,6 +84,9 @@ enum SelectionFields {
                 if specs[spec.key] == nil {
                     specs[spec.key] = spec
                     order.append(spec.key)
+                }
+                if labels[spec.key]?.contains(spec.displayLabel) != true {
+                    labels[spec.key, default: []].append(spec.displayLabel)
                 }
                 originals[spec.key, default: []].append(file.values[spec.key])
                 staged[spec.key, default: []].append(file.staged[spec.key])
@@ -105,11 +111,11 @@ enum SelectionFields {
                 pending = .partial
             }
             groups[spec.group, default: []].append(
-                FieldState(spec: spec, supportCount: origs.count, total: files.count, original: original, pending: pending)
+                FieldState(spec: spec, label: (labels[key] ?? []).joined(separator: " / "), supportCount: origs.count, total: files.count, original: original, pending: pending)
             )
         }
         return groups.keys.sorted().map { group in
-            FieldGroupState(group: group, fields: groups[group]!.sorted { ($0.spec.order, $0.spec.label) < ($1.spec.order, $1.spec.label) })
+            FieldGroupState(group: group, fields: groups[group]!.sorted { ($0.spec.order, $0.label) < ($1.spec.order, $1.label) })
         }
     }
 }

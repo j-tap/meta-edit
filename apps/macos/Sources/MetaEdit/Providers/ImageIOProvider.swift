@@ -50,7 +50,7 @@ final class ImageIOProvider: MetadataProvider {
         }
 
         init(_ field: GeneralField, path: String, shape: XMPShape, fallback: (dictionary: CFString, key: CFString)?) {
-            self.init(id: field.rawValue, label: field.label, group: .general, kind: field.kind, path: path, shape: shape, fallback: fallback)
+            self.init(id: field.rawValue, label: field.label(for: .image), group: .general, kind: field.kind, path: path, shape: shape, fallback: fallback)
         }
 
         var key: FieldKey {
@@ -104,7 +104,7 @@ final class ImageIOProvider: MetadataProvider {
 
     func read(url: URL) throws -> ProviderData {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(source) > 0 else {
-            throw MetadataError("ImageIO could not open \(url.lastPathComponent)")
+            throw MetadataError(tr("ImageIO could not open %@", url.lastPathComponent))
         }
         let type = CGImageSourceGetType(source).map { $0 as String } ?? ""
         let writable = Self.writableTypes.contains(type)
@@ -250,7 +250,7 @@ final class ImageIOProvider: MetadataProvider {
            let longitude = gps[kCGImagePropertyGPSLongitude] as? Double {
             let latitudeSign = (gps[kCGImagePropertyGPSLatitudeRef] as? String) == "S" ? -1.0 : 1.0
             let longitudeSign = (gps[kCGImagePropertyGPSLongitudeRef] as? String) == "W" ? -1.0 : 1.0
-            result.append(("gps", "Location", String(format: "%.5f, %.5f", latitude * latitudeSign, longitude * longitudeSign)))
+            result.append(("gps", "GPS", String(format: "%.5f, %.5f", latitude * latitudeSign, longitude * longitudeSign)))
         }
         return result
     }
@@ -259,15 +259,15 @@ final class ImageIOProvider: MetadataProvider {
 
     func write(url: URL, changes: [FieldKey: FieldValue?]) throws -> URL {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil), let type = CGImageSourceGetType(source) else {
-            throw MetadataError("ImageIO could not open \(url.lastPathComponent)")
+            throw MetadataError(tr("ImageIO could not open %@", url.lastPathComponent))
         }
         guard Self.writableTypes.contains(type as String) else {
-            throw MetadataError("ImageIO cannot write \(url.pathExtension.uppercased()) files")
+            throw MetadataError(tr("ImageIO cannot write %@ files", url.pathExtension.uppercased()))
         }
         let existing = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
         guard let metadata = existing.map({ CGImageMetadataCreateMutableCopy($0) }) ?? CGImageMetadataCreateMutable() else {
-            throw MetadataError("Could not prepare metadata")
+            throw MetadataError(tr("Could not prepare metadata"))
         }
         var error: Unmanaged<CFError>?
         for (prefix, namespace) in Self.namespaces {
@@ -306,13 +306,13 @@ final class ImageIOProvider: MetadataProvider {
         let temporary = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).metaedit-\(UUID().uuidString.prefix(8))")
         guard let destination = CGImageDestinationCreateWithURL(temporary as CFURL, type, 1, nil) else {
-            throw MetadataError("Could not create \(temporary.lastPathComponent)")
+            throw MetadataError(tr("Could not create %@", temporary.lastPathComponent))
         }
         let options: [CFString: Any] = [kCGImageDestinationMetadata: metadata, kCGImageDestinationMergeMetadata: false]
         guard CGImageDestinationCopyImageSource(destination, source, options as CFDictionary, &error) else {
             try? FileManager.default.removeItem(at: temporary)
-            let reason = error?.takeRetainedValue().localizedDescription ?? "unknown error"
-            throw MetadataError("ImageIO could not write \(url.lastPathComponent): \(reason)")
+            let reason = error?.takeRetainedValue().localizedDescription ?? tr("unknown error")
+            throw MetadataError(tr("ImageIO could not write %@: %@", url.lastPathComponent, reason))
         }
         do {
             _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
@@ -349,14 +349,14 @@ final class ImageIOProvider: MetadataProvider {
         case .seq, .bag:
             let parts = path.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2, let namespace = Self.namespaces[parts[0]] else {
-                throw MetadataError("Unknown XMP namespace in \(path)")
+                throw MetadataError(tr("Unknown XMP namespace in %@", path))
             }
             let tagType: CGImageMetadataType = shape == .seq ? .arrayOrdered : .arrayUnordered
             guard let tag = CGImageMetadataTagCreate(namespace, parts[0] as CFString, parts[1] as CFString, tagType, strings as CFArray) else {
-                throw MetadataError("Could not create tag \(path)")
+                throw MetadataError(tr("Could not create tag %@", path))
             }
             ok = CGImageMetadataSetTagWithPath(metadata, nil, path as CFString, tag)
         }
-        guard ok else { throw MetadataError("Could not set \(path)") }
+        guard ok else { throw MetadataError(tr("Could not set %@", path)) }
     }
 }

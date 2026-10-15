@@ -6,14 +6,14 @@ enum FieldGroup: Int, CaseIterable, Comparable, Hashable {
 
     var title: String {
         switch self {
-        case .general: return "General"
-        case .audio: return "Audio"
-        case .photo: return "Photo"
-        case .video: return "Video"
-        case .document: return "Document"
-        case .file: return "File"
-        case .technical: return "Technical"
-        case .raw: return "All tags"
+        case .general: return tr("General")
+        case .audio: return tr("Audio")
+        case .photo: return tr("Photo")
+        case .video: return tr("Video")
+        case .document: return tr("Document")
+        case .file: return tr("File")
+        case .technical: return tr("Technical")
+        case .raw: return tr("All tags")
         }
     }
 
@@ -23,7 +23,14 @@ enum FieldGroup: Int, CaseIterable, Comparable, Hashable {
 }
 
 enum FieldKind: Hashable {
-    case text, multiline, integer, boolean, date, list, image
+    /// `list` is edited as comma separated text, `lines` as one item per line (for items that may contain commas).
+    case text, multiline, integer, boolean, date, list, lines, image
+}
+
+/// What a file is, as far as the editor is concerned. Decides which General fields a provider offers
+/// and how they are labelled. See docs/metadata-schema.md.
+enum MediaCategory: Hashable {
+    case audio, video, image, other
 }
 
 /// Identifies a field within a provider. Two providers may use the same id without clashing.
@@ -40,6 +47,7 @@ struct FieldKey: Hashable, Comparable, CustomStringConvertible {
 
 struct FieldSpec: Identifiable, Hashable {
     let key: FieldKey
+    /// English label, translated for display. Labels of raw tags are tag names and stay as they are.
     let label: String
     let group: FieldGroup
     let kind: FieldKind
@@ -47,6 +55,8 @@ struct FieldSpec: Identifiable, Hashable {
     var order: Int = 0
 
     var id: FieldKey { key }
+
+    var displayLabel: String { group == .raw ? label : tr(label) }
 }
 
 enum FieldValue: Hashable {
@@ -69,8 +79,8 @@ enum FieldValue: Hashable {
         switch self {
         case .text(let s): return s
         case .list(let l): return l.joined(separator: ", ")
-        case .bool(let b): return b ? "Yes" : "No"
-        case .date(let d): return FieldValue.dateFormatter.string(from: d)
+        case .bool(let b): return b ? tr("Yes") : tr("No")
+        case .date(let d): return d.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localizer.shared.locale))
         case .image(let d, let mime):
             return "\(mime), \(ByteCountFormatter.string(fromByteCount: Int64(d.count), countStyle: .file))"
         }
@@ -86,13 +96,6 @@ enum FieldValue: Hashable {
         case .image: return []
         }
     }
-
-    static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
 
     static let isoFormatter = ISO8601DateFormatter()
 }

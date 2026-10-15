@@ -42,6 +42,7 @@ The three apps implement the same documents:
 
 - `docs/metadata-schema.md`: field groups, normalized keys, per-format mapping tables, write rules.
 - `docs/batch-editing.md`: selection model, mixed values, confirmation and save rules.
+- `docs/localization.md`: interface languages, how the language is chosen, glossary of field names.
 
 ## Layout
 

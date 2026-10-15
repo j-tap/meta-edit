@@ -9,7 +9,8 @@ A file is described by a list of fields. Each field has:
 
 - `key`: stable identifier in lower camel case (`title`, `albumArtist`, `whereFrom`).
 - `group`: the editor section that shows it (see below).
-- `kind`: `text`, `multiline`, `integer`, `boolean`, `date`, `list` (ordered strings), `image` (bytes plus MIME type).
+- `kind`: `text`, `multiline`, `integer`, `boolean`, `date`, `list` (ordered strings, edited comma separated),
+  `lines` (ordered strings edited one per line, for items that may contain commas, such as URLs), `image` (bytes plus MIME type).
 - `writable`: whether the provider can write it back. Read-only fields live in the Technical group.
 - `value`: present or absent. Absent means "no such tag in the file". An empty string is never stored:
   saving an empty field removes the tag.
@@ -32,6 +33,31 @@ Exif/IPTC/XMP, PDF Info, filesystem attributes. Several providers can serve one 
 | `raw` | All tags | Every tag of every container as the library sees it: ID3 frame ids, Vorbis keys, MP4 atoms, Exif/XMP names. Arbitrary tags can be added and removed here. |
 
 The editor shows General, then the format groups that apply, then File, then Technical and All tags collapsed.
+
+## Fields per file type
+
+A file belongs to one category, decided by its type: audio, video, image or other. The category decides which
+General fields and which format groups the file gets, and how some General fields are labelled. A tag that the
+category does not offer is still shown and editable in All tags.
+
+| Category | Files | General fields | Groups |
+|---|---|---|---|
+| audio | MP3, FLAC, OGG, Opus, M4A, WAV, AIFF, APE, WMA, MKA, ... | title, artist, album, albumArtist, date, genre, track, disc, composer, comment, copyright, cover | Audio |
+| video | MP4, M4V, 3GP, MKV, WebM | title, artist, date, genre, comment, description, copyright, cover | Video (MP4 family only) |
+| image | everything ImageIO / Exiv2 / the platform reads | title, artist, date, description, keywords, copyright, rating | Photo |
+| other | anything else | none | |
+
+Every category gets the File group, Technical and All tags.
+
+Labels that depend on the category:
+
+| key | audio | video | image |
+|---|---|---|---|
+| artist | Artist | Author | Author |
+| date | Year | Date | Date created |
+
+General fields keep one key across categories, so a selection of an MP3 and a JPEG still edits one row. When
+the selected files label a field differently, the row shows the labels joined with " / ", e.g. "Artist / Author".
 
 ## General fields and per-format mapping
 
@@ -102,14 +128,17 @@ Technical. They stay editable in All tags.
 
 ## Video group (MP4, M4V, MOV, 3GP)
 
+The General `description` of an MP4 video is the `desc` atom (TagLib calls it PODCASTDESC); Matroska uses DESCRIPTION.
+
 | key | kind | MP4 ilst | QuickTime keys / udta |
 |---|---|---|---|
-| longDescription | multiline | ldes | com.apple.quicktime.description |
 | show | text | tvsh | |
 | season | integer | tvsn | |
 | episode | integer | tves | |
 | episodeId | text | tven | |
-| mediaKind | text | stik | |
+| network | text | tvnn | |
+| longDescription | multiline | ldes (planned) | com.apple.quicktime.description |
+| mediaKind | text | stik (planned) | |
 | location | text, ISO 6709 | | ©xyz; com.apple.quicktime.location.ISO6709 |
 | creationDate | date | | com.apple.quicktime.creationdate |
 | cameraMake | text | | com.apple.quicktime.make |
@@ -145,7 +174,7 @@ candidate for a later provider.
 | modified | date | contentModificationDate | mtime | last write time |
 | tags | list | Finder tags, `com.apple.metadata:_kMDItemUserTags` | `user.xdg.tags` | |
 | comment | multiline | Finder comment, `com.apple.metadata:kMDItemFinderComment` | `user.xdg.comment` | |
-| whereFrom | list | `com.apple.metadata:kMDItemWhereFroms` | `user.xdg.origin.url` | `Zone.Identifier` stream, HostUrl |
+| whereFrom | lines | `com.apple.metadata:kMDItemWhereFroms`, shown by Finder as "Where from" | `user.xdg.origin.url` | `Zone.Identifier` stream, HostUrl |
 
 `name` is only editable with a single file selected. Technical shows path, size and type.
 

@@ -31,14 +31,14 @@ final class FileAttributesProvider: MetadataProvider {
             (Xattr.plist(url, Self.finderCommentAttribute) as? String).map(FieldValue.text)
         )
         data.add(
-            FieldSpec(key: key("whereFrom"), label: "Where from", group: .file, kind: .list, order: 3),
+            FieldSpec(key: key("whereFrom"), label: "Where from", group: .file, kind: .lines, order: 3),
             .list(Xattr.plist(url, Self.whereFromsAttribute) as? [String] ?? [])
         )
         data.add(FieldSpec(key: key("created"), label: "Created", group: .file, kind: .date, order: 4), values.creationDate.map(FieldValue.date))
         data.add(FieldSpec(key: key("modified"), label: "Modified", group: .file, kind: .date, order: 5), values.contentModificationDate.map(FieldValue.date))
 
         data.add(
-            FieldSpec(key: key("path"), label: "Location", group: .technical, kind: .text, writable: false, order: 1000),
+            FieldSpec(key: key("path"), label: "Folder", group: .technical, kind: .text, writable: false, order: 1000),
             .text((url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
         )
         data.add(
@@ -87,12 +87,12 @@ final class FileAttributesProvider: MetadataProvider {
         if let entry = changes[Self.nameKey], case .text(let newName)? = entry {
             let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, !trimmed.contains("/"), trimmed != ".", trimmed != ".." else {
-                throw MetadataError("Invalid file name")
+                throw MetadataError(tr("Invalid file name"))
             }
             let destination = url.deletingLastPathComponent().appendingPathComponent(trimmed)
             if destination.path != url.path {
                 guard !FileManager.default.fileExists(atPath: destination.path) else {
-                    throw MetadataError("A file named \(trimmed) already exists")
+                    throw MetadataError(tr("A file named %@ already exists", trimmed))
                 }
                 try FileManager.default.moveItem(at: url, to: destination)
                 target = destination

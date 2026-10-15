@@ -24,6 +24,11 @@ mkdir -p "$out/Contents/MacOS" "$out/Contents/Resources"
 cp "$bin" "$out/Contents/MacOS/MetaEdit"
 sed -e "s/__VERSION__/$version/g" "$app/Resources/Info.plist" > "$out/Contents/Info.plist"
 printf 'APPL????' > "$out/Contents/PkgInfo"
+# Interface strings live in the binary (Sources/MetaEdit/Localization); the .lproj folders tell macOS which
+# languages the app speaks, so its own menus (Edit, Window, Services) follow the chosen language.
+for lang in en ru es zh-Hans; do
+  mkdir -p "$out/Contents/Resources/$lang.lproj"
+done
 if [[ -f "$app/Resources/AppIcon.icns" ]]; then
   cp "$app/Resources/AppIcon.icns" "$out/Contents/Resources/AppIcon.icns"
 fi

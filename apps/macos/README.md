@@ -27,7 +27,10 @@ From the repository root: `make macos`, `make macos-dmg`, `make test-macos`.
 
 - File list with multi-selection, filtering, drag and drop of files and folders (recursive), Open With from
   Finder, keyboard removal, dirty and error markers.
-- Editor with the groups from `docs/metadata-schema.md`: General, Audio, Photo, File, Technical, All tags.
+- Editor with the groups from `docs/metadata-schema.md`: General, Audio, Photo, Video, File, Technical, All tags.
+  Each file gets the fields of its category (audio, video, image, other), as in "Fields per file type".
+- Interface in English, Russian, Spanish and Simplified Chinese (`docs/localization.md`): follows the system,
+  can be switched in Settings without a restart.
 - Batch editing per `docs/batch-editing.md`: "Multiple values" placeholder, a popover listing the distinct
   values that applies one to every file, removal from all files, per-field revert, confirmation sheet with
   "Only where empty" before writing several files.
@@ -53,6 +56,11 @@ Not yet: ExifTool integration, PDF and Office documents, Markdown front matter, 
 - ImageIO writes an XMP packet only when the metadata carries an `iio:hasXMP` marker; the provider adds it.
   ImageIO also regenerates the IPTC IIM block from XMP and Exif on write, so IPTC-only values are mirrored
   into XMP before writing. When Exif and IPTC disagree, Exif wins, as in the Metadata Working Group rules.
+- Interface strings are Swift dictionaries in `Sources/MetaEdit/Localization`, not `.strings` or `.xcstrings`
+  files: string catalogs need Xcode to compile, and in-code tables switch language at runtime. English strings
+  are the keys. `build-app.sh` adds empty `.lproj` folders and `CFBundleLocalizations` so that the menus macOS
+  provides are localized too; picking a language in Settings writes `AppleLanguages` for the app, which those
+  menus read at launch. `translationsAreComplete` scans the sources and fails on a missing key.
 - The setter of `URLResourceValues.tagNames` needs macOS 26, so Finder tags are written as the
   `com.apple.metadata:_kMDItemUserTags` attribute, preserving tag colours.
 

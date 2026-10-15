@@ -12,6 +12,8 @@ final class TagLibProvider: MetadataProvider {
         "mkv", "mka", "webm", "mod", "s3m", "it", "xm",
     ]
 
+    private static let videoExtensions: Set<String> = ["mp4", "m4v", "3g2", "3gp", "mkv", "webm"]
+
     private enum Family { case id3, vorbis, mp4, ape, asf, matroska, other }
 
     private struct Mapping {
@@ -20,17 +22,36 @@ final class TagLibProvider: MetadataProvider {
         let group: FieldGroup
         let kind: FieldKind
         let key: String
+        /// Categories that get a non-General field. General fields follow GeneralField.fields(for:).
+        var categories: Set<MediaCategory> = [.audio]
+        /// Containers that have a place for the field; nil means all.
+        var families: Set<Family>?
 
-        init(id: String, label: String, group: FieldGroup, kind: FieldKind, key: String) {
+        init(id: String, label: String, group: FieldGroup, kind: FieldKind, key: String,
+             categories: Set<MediaCategory> = [.audio], families: Set<Family>? = nil) {
             self.id = id
             self.label = label
             self.group = group
             self.kind = kind
             self.key = key
+            self.categories = categories
+            self.families = families
         }
 
         init(_ field: GeneralField, key: String) {
-            self.init(id: field.rawValue, label: field.label, group: .general, kind: field.kind, key: key)
+            self.init(id: field.rawValue, label: "", group: .general, kind: field.kind, key: key)
+        }
+
+        var generalField: GeneralField? { group == .general ? GeneralField(rawValue: id) : nil }
+
+        func applies(to category: MediaCategory, _ family: Family) -> Bool {
+            if let families, !families.contains(family) { return false }
+            if let field = generalField { return GeneralField.fields(for: category).contains(field) }
+            return categories.contains(category)
+        }
+
+        func label(for category: MediaCategory) -> String {
+            generalField?.label(for: category) ?? label
         }
     }
 
@@ -55,6 +76,11 @@ final class TagLibProvider: MetadataProvider {
         Mapping(id: "encodedBy", label: "Encoded by", group: .audio, kind: .text, key: "ENCODEDBY"),
         Mapping(id: "compilation", label: "Compilation", group: .audio, kind: .boolean, key: "COMPILATION"),
         Mapping(id: "grouping", label: "Grouping", group: .audio, kind: .text, key: "GROUPING"),
+        Mapping(id: "show", label: "TV show", group: .video, kind: .text, key: "TVSHOW", categories: [.video], families: [.mp4]),
+        Mapping(id: "season", label: "Season", group: .video, kind: .integer, key: "TVSEASON", categories: [.video], families: [.mp4]),
+        Mapping(id: "episode", label: "Episode", group: .video, kind: .integer, key: "TVEPISODE", categories: [.video], families: [.mp4]),
+        Mapping(id: "episodeId", label: "Episode ID", group: .video, kind: .text, key: "TVEPISODEID", categories: [.video], families: [.mp4]),
+        Mapping(id: "network", label: "TV network", group: .video, kind: .text, key: "TVNETWORK", categories: [.video], families: [.mp4]),
     ]
 
     init() {
@@ -78,8 +104,14 @@ final class TagLibProvider: MetadataProvider {
         }
     }
 
+    private func category(of url: URL) -> MediaCategory {
+        Self.videoExtensions.contains(url.pathExtension.lowercased()) ? .video : .audio
+    }
+
     private func propertyKey(_ mapping: Mapping, _ family: Family) -> String {
         if mapping.id == "publisher", family == .vorbis { return "ORGANIZATION" }
+        // TagLib maps the MP4 "desc" atom to PODCASTDESC; it is the description iTunes and the TV app show.
+        if mapping.id == "description", family == .mp4 { return "PODCASTDESC" }
         return mapping.key
     }
 
@@ -93,22 +125,23 @@ final class TagLibProvider: MetadataProvider {
 
     func read(url: URL) throws -> ProviderData {
         guard let file = taglib_file_new(url.path) else {
-            throw MetadataError("TagLib could not open \(url.lastPathComponent)")
+            throw MetadataError(tr("TagLib could not open %@", url.lastPathComponent))
         }
         defer {
             taglib_file_free(file)
             taglib_tag_free_strings()
         }
         guard taglib_file_is_valid(file) != 0 else {
-            throw MetadataError("Unsupported or damaged media file")
+            throw MetadataError(tr("Unsupported or damaged media file"))
         }
 
         let family = family(of: url)
+        let category = category(of: url)
         let props = readProperties(file)
         var data = ProviderData()
         var order = 0
 
-        for mapping in Self.mappings {
+        for mapping in Self.mappings where mapping.applies(to: category, family) {
             var values = props[propertyKey(mapping, family)] ?? []
             switch mapping.id {
             case "publisher" where values.isEmpty:
@@ -129,19 +162,21 @@ final class TagLibProvider: MetadataProvider {
             default:
                 value = values.isEmpty ? nil : .text(values.joined(separator: "; "))
             }
-            let specOrder = mapping.group == .general ? GeneralField(rawValue: mapping.id)?.order ?? order : order
-            data.add(FieldSpec(key: key(for: mapping), label: mapping.label, group: mapping.group, kind: mapping.kind, order: specOrder), value)
+            let specOrder = mapping.generalField?.order ?? order
+            data.add(FieldSpec(key: key(for: mapping), label: mapping.label(for: category), group: mapping.group, kind: mapping.kind, order: specOrder), value)
             order += 1
         }
 
-        data.add(GeneralField.cover.spec(), readPicture(file))
+        if GeneralField.fields(for: category).contains(.cover) {
+            data.add(GeneralField.cover.spec(for: category), readPicture(file))
+        }
 
         if let properties = taglib_file_audioproperties(file) {
             let seconds = Int(taglib_audioproperties_length(properties))
             let technical: [(String, String, String)] = [
                 ("duration", "Duration", String(format: "%d:%02d", seconds / 60, seconds % 60)),
-                ("bitrate", "Bitrate", "\(taglib_audioproperties_bitrate(properties)) kb/s"),
-                ("sampleRate", "Sample rate", "\(taglib_audioproperties_samplerate(properties)) Hz"),
+                ("bitrate", "Bitrate", tr("%d kb/s", Int(taglib_audioproperties_bitrate(properties)))),
+                ("sampleRate", "Sample rate", tr("%d Hz", Int(taglib_audioproperties_samplerate(properties)))),
                 ("channels", "Channels", "\(taglib_audioproperties_channels(properties))"),
             ]
             for (id, label, text) in technical {
@@ -204,14 +239,14 @@ final class TagLibProvider: MetadataProvider {
 
     func write(url: URL, changes: [FieldKey: FieldValue?]) throws -> URL {
         guard let file = taglib_file_new(url.path) else {
-            throw MetadataError("TagLib could not open \(url.lastPathComponent)")
+            throw MetadataError(tr("TagLib could not open %@", url.lastPathComponent))
         }
         defer {
             taglib_file_free(file)
             taglib_tag_free_strings()
         }
         guard taglib_file_is_valid(file) != 0 else {
-            throw MetadataError("Unsupported or damaged media file")
+            throw MetadataError(tr("Unsupported or damaged media file"))
         }
         let family = family(of: url)
 
@@ -250,7 +285,7 @@ final class TagLibProvider: MetadataProvider {
         }
 
         guard taglib_file_save(file) != 0 else {
-            throw MetadataError("TagLib could not save \(url.lastPathComponent)")
+            throw MetadataError(tr("TagLib could not save %@", url.lastPathComponent))
         }
         return url
     }
@@ -270,7 +305,7 @@ final class TagLibProvider: MetadataProvider {
     private func setPicture(_ file: UnsafeMutablePointer<TagLib_File>, _ value: FieldValue?) throws {
         guard case .image(let data, let mime)? = value, !data.isEmpty else {
             guard taglib_complex_property_set(file, "PICTURE", nil) != 0 else {
-                throw MetadataError("Could not remove the cover")
+                throw MetadataError(tr("Could not remove the cover"))
             }
             return
         }
@@ -303,6 +338,6 @@ final class TagLibProvider: MetadataProvider {
                 taglib_complex_property_set(file, "PICTURE", pointerBuffer.baseAddress) != 0
             }
         }
-        guard ok else { throw MetadataError("Could not set the cover") }
+        guard ok else { throw MetadataError(tr("Could not set the cover")) }
     }
 }

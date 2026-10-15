@@ -66,9 +66,9 @@ final class AppState {
             selection = [first.id]
         }
         if added.isEmpty {
-            status = skipped > 0 ? "Already in the list" : "No files found"
+            status = skipped > 0 ? tr("Already in the list") : tr("No files found")
         } else {
-            status = "Added \(added.count) file\(added.count == 1 ? "" : "s")"
+            status = trPlural("Added %d files", added.count)
         }
     }
 
@@ -152,8 +152,8 @@ final class AppState {
         isSaving = false
         let saved = files.count - failed
         status = failed == 0
-            ? "Saved \(saved) file\(saved == 1 ? "" : "s")"
-            : "Saved \(saved), failed \(failed)"
+            ? trPlural("Saved %d files", saved)
+            : tr("Saved %d, failed %d", saved, failed)
     }
 
     // MARK: Panels and dialogs
@@ -163,8 +163,8 @@ final class AppState {
         panel.canChooseFiles = !directoriesOnly
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.message = directoriesOnly ? "Choose folders to add" : "Choose files or folders to add"
-        panel.prompt = "Add"
+        panel.message = directoriesOnly ? tr("Choose folders to add") : tr("Choose files or folders to add")
+        panel.prompt = tr("Add")
         if panel.runModal() == .OK {
             addURLs(panel.urls)
         }
@@ -175,11 +175,11 @@ final class AppState {
         let dirty = dirty ?? dirtyFiles
         guard !dirty.isEmpty else { return true }
         let alert = NSAlert()
-        alert.messageText = "Save changes to \(dirty.count) file\(dirty.count == 1 ? "" : "s")?"
-        alert.informativeText = "Your changes will be lost if you don't save them."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        alert.addButton(withTitle: "Don't Save")
+        alert.messageText = trPlural("Save changes to %d files?", dirty.count)
+        alert.informativeText = tr("Your changes will be lost if you don't save them.")
+        alert.addButton(withTitle: tr("Save"))
+        alert.addButton(withTitle: tr("Cancel"))
+        alert.addButton(withTitle: tr("Don't Save"))
         switch alert.runModal() {
         case .alertFirstButtonReturn:
             performSave(dirty, onlyWhereEmpty: [])

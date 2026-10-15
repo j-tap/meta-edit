@@ -11,10 +11,10 @@ struct FileListView: View {
                 FileRow(file: file)
                     .tag(file.id)
                     .contextMenu {
-                        Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
-                        Button("Revert Changes") { file.revertAll() }.disabled(!file.isDirty)
+                        Button(tr("Reveal in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([file.url]) }
+                        Button(tr("Revert Changes")) { file.revertAll() }.disabled(!file.isDirty)
                         Divider()
-                        Button("Remove from List") { state.remove([file.id]) }
+                        Button(tr("Remove from List")) { state.remove([file.id]) }
                     }
             }
         }
@@ -23,9 +23,9 @@ struct FileListView: View {
         .overlay {
             if state.files.isEmpty {
                 ContentUnavailableView {
-                    Label("No files", systemImage: "doc.badge.plus")
+                    Label(tr("No files"), systemImage: "doc.badge.plus")
                 } description: {
-                    Text("Drop files or folders here, or press ⌘O.")
+                    Text(tr("Drop files or folders here, or press ⌘O."))
                 }
             }
         }
@@ -45,7 +45,7 @@ struct FileListView: View {
 
     private var summary: String {
         if let status = state.status { return status }
-        return "\(state.files.count) files, \(state.selection.count) selected"
+        return tr("%@, %d selected", trPlural("%d files", state.files.count), state.selection.count)
     }
 }
 
@@ -77,7 +77,7 @@ struct FileRow: View {
                 Circle()
                     .fill(.orange)
                     .frame(width: 7, height: 7)
-                    .help("Unsaved changes")
+                    .help(tr("Unsaved changes"))
             }
         }
         .padding(.vertical, 2)

@@ -10,9 +10,9 @@ struct EditorView: View {
         let files = state.selectedFiles
         if files.isEmpty {
             ContentUnavailableView {
-                Label(state.files.isEmpty ? "No files" : "No selection", systemImage: "square.and.pencil")
+                Label(state.files.isEmpty ? tr("No files") : tr("No selection"), systemImage: "square.and.pencil")
             } description: {
-                Text(state.files.isEmpty ? "Add files to get started." : "Select one or more files to edit their metadata.")
+                Text(state.files.isEmpty ? tr("Add files to get started.") : tr("Select one or more files to edit their metadata."))
             }
         } else {
             let groups = SelectionFields.compute(files)
@@ -50,7 +50,7 @@ struct EditorHeader: View {
                 .resizable()
                 .frame(width: 48, height: 48)
             VStack(alignment: .leading, spacing: 2) {
-                Text(files.count == 1 ? files[0].name : "\(files.count) files")
+                Text(files.count == 1 ? files[0].name : trPlural("%d files", files.count))
                     .font(.title3.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -63,17 +63,17 @@ struct EditorHeader: View {
             }
             Spacer()
             if !files.allSatisfy(\.isWritable) {
-                Label("Read-only", systemImage: "lock")
+                Label(tr("Read-only"), systemImage: "lock")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             if files.contains(where: \.isDirty) {
-                Text("Modified")
+                Text(tr("Edited"))
                     .font(.caption.weight(.medium))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(.orange.opacity(0.2), in: Capsule())
-                Button("Revert") { state.revert(files) }
+                Button(tr("Revert")) { state.revert(files) }
             }
         }
         .padding(16)
