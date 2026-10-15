@@ -18,10 +18,13 @@ than one file is selected.
 
 - Typing into a field stages the value for every selected file that supports it. The row gets a pending marker and a revert button.
 - A mixed field left untouched changes nothing. Focusing it changes nothing either; only an edit stages a value.
-- Clearing a field stages removal of the tag.
+- The info button of a mixed field lists the distinct values with their counts; clicking one applies it to every selected file.
+- Clearing a field that had one common value stages removal of the tag. Clearing a mixed field returns it to "Multiple values";
+  the separate remove button next to it removes the field from every selected file.
 - Cover: a mixed cover shows a stacked placeholder. Dropping or choosing an image sets it for all selected files; Remove removes it from all.
 - A staged value can be limited to files where the field is currently empty: "Only where empty", offered per field in the confirmation dialog, off by default.
-- Lists (keywords, tags) in a mixed state offer "Add to all" for appending without replacing existing items.
+- Lists (keywords, tags) in a mixed state offer "Add to all" for appending without replacing existing items (planned).
+- General fields (title, artist, keywords, ...) are shared across file types: one Keywords row edits ID3, Vorbis, MP4 and XMP keywords alike.
 
 ## Unsaved changes
 
@@ -46,5 +49,6 @@ than one file is selected.
 - Files and folders come in through the open dialog, drag and drop onto the list or the app icon, or Open With from the file manager.
 - Folders are added recursively. Hidden files are skipped. Files of unknown type still appear, with only the File group.
   A file already in the list is not added twice.
-- The list keeps insertion order; sorting by name, type, folder or modification date is available.
+- The list keeps insertion order; sorting by name, type, folder or modification date is available (planned).
 - The list can be filtered by typing; filtering does not change the selection.
+- Select All Files (Shift+Cmd+A) selects every listed file; Delete or Cmd+Backspace removes the selection from the list.

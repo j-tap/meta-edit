@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  macos:
+    name: macOS build and tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache TagLib
+        uses: actions/cache@v4
+        with:
+          path: apps/macos/vendor/taglib
+          key: taglib-${{ runner.os }}-${{ hashFiles('apps/macos/scripts/build-taglib.sh') }}
+      - name: Build TagLib
+        run: apps/macos/scripts/build-taglib.sh
+      - name: Run tests
+        run: apps/macos/scripts/test.sh
+      - name: Build app
+        run: apps/macos/scripts/build-app.sh
+      - name: Zip app bundle
+        run: ditto -c -k --keepParent apps/macos/dist/MeteEdit.app apps/macos/dist/MeteEdit-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeteEdit-macos
+          path: apps/macos/dist/MeteEdit-macos.zip

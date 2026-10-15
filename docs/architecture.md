@@ -71,7 +71,8 @@ tags `v1.2.0` and pushes. GitHub Actions (`.github/workflows/release.yml`) react
 3. `ubuntu-latest` builds `MeteEdit-1.2.0-linux-amd64.deb` and `MeteEdit-1.2.0.flatpak`.
 4. A final job creates the GitHub Release `v1.2.0` and attaches every artifact.
 
-`ci.yml` runs the same builds plus tests on every push and pull request without publishing.
+`ci.yml` runs the same builds plus tests on every push and pull request without publishing. The macOS job builds the
+app with Xcode on the GitHub runner, so the SwiftUI code is verified there even on machines with only the Command Line Tools.
 
 Local builds: `make macos` on macOS, `make linux` on Linux (or on macOS with Homebrew GTK for development),
 `make windows` on Windows. The Windows core library and its tests run everywhere with `dotnet test`.
