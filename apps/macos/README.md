@@ -47,8 +47,9 @@ Not yet: ExifTool integration, PDF and Office documents, Markdown front matter, 
 - The macOS 26+ SDK declares `@State` as a macro whose plugin ships only with Xcode. The app uses
   `@ViewState`, an alias of the `State` property wrapper (`Sources/MetaEdit/Support/ViewState.swift`),
   so it builds with the Command Line Tools too. Behaviour is identical.
-- SwiftPM under the Command Line Tools does not reliably pick a test library; `scripts/test.sh` passes
-  `--enable-swift-testing --disable-xctest`.
+- With the Command Line Tools alone, `xcrun` cannot report a platform path, so SwiftPM does not find the
+  Testing framework and its macro plugin. `scripts/test.sh` detects that layout and passes the framework,
+  plugin and rpath flags explicitly; with Xcode it runs plain `swift test`.
 - ImageIO writes an XMP packet only when the metadata carries an `iio:hasXMP` marker; the provider adds it.
   ImageIO also regenerates the IPTC IIM block from XMP and Exif on write, so IPTC-only values are mirrored
   into XMP before writing. When Exif and IPTC disagree, Exif wins, as in the Metadata Working Group rules.
