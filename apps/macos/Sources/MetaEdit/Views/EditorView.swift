@@ -44,9 +44,11 @@ struct EditorHeader: View {
     @Environment(AppState.self) private var state
     let files: [FileItem]
 
+    private static let multipleFilesIcon = NSWorkspace.shared.icon(for: .data)
+
     var body: some View {
         HStack(spacing: 12) {
-            Image(nsImage: files.count == 1 ? files[0].icon : NSWorkspace.shared.icon(for: .data))
+            Image(nsImage: files.count == 1 ? files[0].icon : Self.multipleFilesIcon)
                 .resizable()
                 .frame(width: 48, height: 48)
             VStack(alignment: .leading, spacing: 2) {

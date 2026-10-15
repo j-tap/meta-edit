@@ -110,10 +110,10 @@ extension Translations {
         "Remove from list": "Quitar de la lista",
         "Filter files": "Filtrar archivos",
         "Add Files…": "Añadir archivos…",
-        "Add files or folders (⌘O)": "Añadir archivos o carpetas (⌘O)",
+        "Add files or folders (%@)": "Añadir archivos o carpetas (%@)",
         "Remove": "Eliminar",
-        "Save selected files (⌘S)": "Guardar los archivos seleccionados (⌘S)",
-        "Save all changed files (⇧⌘S)": "Guardar todos los archivos modificados (⇧⌘S)",
+        "Save selected files (%@)": "Guardar los archivos seleccionados (%@)",
+        "Save all changed files (%@)": "Guardar todos los archivos modificados (%@)",
 
         // Settings
         "Language": "Idioma",
@@ -126,7 +126,7 @@ extension Translations {
         "Reveal in Finder": "Mostrar en el Finder",
         "Revert Changes": "Descartar cambios",
         "No files": "No hay archivos",
-        "Drop files or folders here, or press ⌘O.": "Arrastra aquí archivos o carpetas, o pulsa ⌘O.",
+        "Drop files or folders here, or press %@.": "Arrastra aquí archivos o carpetas, o pulsa %@.",
         "%@, %d selected": "%@, %d seleccionados",
         "Unsaved changes": "Cambios sin guardar",
         "Already in the list": "Ya está en la lista",

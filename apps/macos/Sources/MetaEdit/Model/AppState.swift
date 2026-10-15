@@ -42,6 +42,10 @@ final class AppState {
     var selectedFiles: [FileItem] { files.filter { selection.contains($0.id) } }
     var dirtyFiles: [FileItem] { files.filter(\.isDirty) }
     var selectionIsDirty: Bool { selectedFiles.contains(where: \.isDirty) }
+    var canSaveSelected: Bool { !isSaving && selectionIsDirty }
+    var canSaveAll: Bool { !isSaving && files.contains(where: \.isDirty) }
+
+    func selectAllListed() { selection = Set(filteredFiles.map(\.id)) }
 
     /// Shows `message` under the list for a few seconds, then the file count again.
     private func showStatus(_ message: String) {
@@ -66,16 +70,11 @@ final class AppState {
         let expanded = await Task.detached(priority: .userInitiated) { Self.expand(urls) }.value
         // Loads are queued, so the list already holds everything earlier loads added.
         var seen = Set(files.map { $0.url.standardizedFileURL.path })
+        let fresh = expanded.filter { seen.insert($0.standardizedFileURL.path).inserted }
+        let skipped = expanded.count - fresh.count
         var added: [FileItem] = []
-        var skipped = 0
-        for url in expanded {
-            let path = url.standardizedFileURL.path
-            guard !seen.contains(path) else {
-                skipped += 1
-                continue
-            }
-            seen.insert(path)
-            let snapshot = await Task.detached(priority: .userInitiated) { FileItem.read(url) }.value
+        // Files are read several at a time and join the list in order as they are ready.
+        await mapConcurrently(fresh, transform: { FileItem.read($0) }) { url, snapshot in
             let item = FileItem(url: url)
             item.apply(snapshot)
             files.append(item)

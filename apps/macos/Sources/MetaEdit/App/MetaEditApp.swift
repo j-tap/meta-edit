@@ -18,26 +18,26 @@ struct MetaEditApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button(tr("Open…")) { state.openPanel() }
-                    .keyboardShortcut("o")
+                    .keyboardShortcut(Shortcut.open)
                 Button(tr("Add Folder…")) { state.openPanel(directoriesOnly: true) }
-                    .keyboardShortcut("o", modifiers: [.command, .shift])
+                    .keyboardShortcut(Shortcut.addFolder)
             }
             CommandGroup(after: .pasteboard) {
                 Divider()
-                Button(tr("Select All Files")) { state.selection = Set(state.filteredFiles.map(\.id)) }
-                    .keyboardShortcut("a", modifiers: [.command, .shift])
+                Button(tr("Select All Files")) { state.selectAllListed() }
+                    .keyboardShortcut(Shortcut.selectAllFiles)
                     .disabled(state.files.isEmpty)
                 Button(tr("Deselect All")) { state.selection = [] }
-                    .keyboardShortcut("a", modifiers: [.command, .shift, .option])
+                    .keyboardShortcut(Shortcut.deselectAll)
                     .disabled(state.selection.isEmpty)
             }
             CommandGroup(replacing: .saveItem) {
                 Button(tr("Save")) { state.saveSelected() }
-                    .keyboardShortcut("s")
-                    .disabled(!state.selectionIsDirty || state.isSaving)
+                    .keyboardShortcut(Shortcut.save)
+                    .disabled(!state.canSaveSelected)
                 Button(tr("Save All")) { state.saveAll() }
-                    .keyboardShortcut("s", modifiers: [.command, .shift])
-                    .disabled(state.dirtyFiles.isEmpty || state.isSaving)
+                    .keyboardShortcut(Shortcut.saveAll)
+                    .disabled(!state.canSaveAll)
                 Divider()
                 Button(tr("Revert Selected")) { state.revertSelected() }
                     .disabled(!state.selectionIsDirty)
@@ -45,7 +45,7 @@ struct MetaEditApp: App {
                     .disabled(state.dirtyFiles.isEmpty)
                 Divider()
                 Button(tr("Remove from List")) { state.removeSelected() }
-                    .keyboardShortcut(.delete, modifiers: .command)
+                    .keyboardShortcut(Shortcut.removeFromList)
                     .disabled(state.selection.isEmpty)
             }
         }

@@ -25,7 +25,7 @@ struct FileListView: View {
                 ContentUnavailableView {
                     Label(tr("No files"), systemImage: "doc.badge.plus")
                 } description: {
-                    Text(tr("Drop files or folders here, or press ⌘O."))
+                    Text(tr("Drop files or folders here, or press %@.", Shortcut.open.symbols))
                 }
             }
         }

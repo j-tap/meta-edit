@@ -1,15 +1,16 @@
 import Foundation
 
 /// A provider owns one metadata container (audio tags, image metadata, file attributes).
-protocol MetadataProvider: AnyObject {
-    var id: String { get }
+/// Providers hold no state, so files are read and written off the main thread.
+protocol MetadataProvider: Sendable {
+    var id: ProviderID { get }
     func supports(_ url: URL) -> Bool
     func read(url: URL) throws -> ProviderData
     /// Writes changes (a nil value removes the tag). Returns the file URL afterwards; it changes on rename.
     func write(url: URL, changes: [FieldKey: FieldValue?]) throws -> URL
 }
 
-struct ProviderData {
+struct ProviderData: Sendable {
     var specs: [FieldSpec] = []
     var values: [FieldKey: FieldValue] = [:]
 

@@ -2,15 +2,11 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// Filesystem attributes available for every file: name, dates, Finder tags, Finder comment, "where from".
-final class FileAttributesProvider: MetadataProvider {
-    static let providerID = "file"
-    static let nameKey = FieldKey(provider: providerID, id: "name")
-    static let createdKey = FieldKey(provider: providerID, id: "created")
-    static let modifiedKey = FieldKey(provider: providerID, id: "modified")
+struct FileAttributesProvider: MetadataProvider {
     /// Fields that set file dates explicitly, so saving must not restore the old modification date.
-    static let dateKeys: Set<FieldKey> = [createdKey, modifiedKey]
+    static let dateKeys: Set<FieldKey> = [FileField.created.key, FileField.modified.key]
 
-    let id = FileAttributesProvider.providerID
+    let id = ProviderID.file
 
     private static let finderCommentAttribute = "com.apple.metadata:kMDItemFinderComment"
     private static let whereFromsAttribute = "com.apple.metadata:kMDItemWhereFroms"
@@ -20,39 +16,21 @@ final class FileAttributesProvider: MetadataProvider {
 
     func supports(_ url: URL) -> Bool { true }
 
-    private func key(_ id: String) -> FieldKey { FieldKey(provider: self.id, id: id) }
-
     func read(url: URL) throws -> ProviderData {
         let values = try url.resourceValues(forKeys: [
             .nameKey, .creationDateKey, .contentModificationDateKey, .tagNamesKey,
             .fileSizeKey, .contentTypeKey, .localizedTypeDescriptionKey,
         ])
         var data = ProviderData()
-        data.add(FieldSpec(key: Self.nameKey, label: "Name", group: .file, kind: .text, order: 0), .text(values.name ?? url.lastPathComponent))
-        data.add(FieldSpec(key: key("tags"), label: "Tags", group: .file, kind: .list, order: 1), .list(values.tagNames ?? []))
-        data.add(
-            FieldSpec(key: key("comment"), label: "Comment", group: .file, kind: .multiline, order: 2),
-            (Xattr.plist(url, Self.finderCommentAttribute) as? String).map(FieldValue.text)
-        )
-        data.add(
-            FieldSpec(key: key("whereFrom"), label: "Where from", group: .file, kind: .lines, order: 3),
-            .list(Xattr.plist(url, Self.whereFromsAttribute) as? [String] ?? [])
-        )
-        data.add(FieldSpec(key: Self.createdKey, label: "Created", group: .file, kind: .date, order: 4), values.creationDate.map(FieldValue.date))
-        data.add(FieldSpec(key: Self.modifiedKey, label: "Modified", group: .file, kind: .date, order: 5), values.contentModificationDate.map(FieldValue.date))
-
-        data.add(
-            FieldSpec(key: key("path"), label: "Folder", group: .technical, kind: .text, writable: false, order: 1000),
-            .text((url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
-        )
-        data.add(
-            FieldSpec(key: key("size"), label: "Size", group: .technical, kind: .text, writable: false, order: 1001),
-            .text(ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file))
-        )
-        data.add(
-            FieldSpec(key: key("type"), label: "Kind", group: .technical, kind: .text, writable: false, order: 1002),
-            .text(values.localizedTypeDescription ?? values.contentType?.identifier ?? "")
-        )
+        data.add(FileField.name.spec(), .text(values.name ?? url.lastPathComponent))
+        data.add(FileField.tags.spec(), .list(values.tagNames ?? []))
+        data.add(FileField.comment.spec(), (Xattr.plist(url, Self.finderCommentAttribute) as? String).map(FieldValue.text))
+        data.add(FileField.whereFrom.spec(), .list(Xattr.plist(url, Self.whereFromsAttribute) as? [String] ?? []))
+        data.add(FileField.created.spec(), values.creationDate.map(FieldValue.date))
+        data.add(FileField.modified.spec(), values.contentModificationDate.map(FieldValue.date))
+        data.add(FileField.folder.spec(), .text((url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath))
+        data.add(FileField.size.spec(), .text(ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file)))
+        data.add(FileField.contentType.spec(), .text(values.localizedTypeDescription ?? values.contentType?.identifier ?? ""))
         return data
     }
 
@@ -60,35 +38,38 @@ final class FileAttributesProvider: MetadataProvider {
         var target = url
         var resourceValues = URLResourceValues()
         var touched = false
-        for (fieldKey, entry) in changes {
-            let value: FieldValue? = entry
-            switch fieldKey.id {
-            case Self.createdKey.id:
+        for (key, value) in changes {
+            guard case .file(let field) = key else { continue }
+            switch field {
+            case .created:
                 if case .date(let date)? = value {
                     resourceValues.creationDate = date
                     touched = true
                 }
-            case Self.modifiedKey.id:
+            case .modified:
                 if case .date(let date)? = value {
                     resourceValues.contentModificationDate = date
                     touched = true
                 }
-            case "tags":
+            case .tags:
                 try writeTags(value?.strings ?? [], to: url)
-            case "comment":
+            case .comment:
                 let text = value?.displayText ?? ""
                 try Xattr.setPlist(url, Self.finderCommentAttribute, text.isEmpty ? nil : text)
-            case "whereFrom":
+            case .whereFrom:
                 let list = value?.strings ?? []
                 try Xattr.setPlist(url, Self.whereFromsAttribute, list.isEmpty ? nil : list)
-            default:
+            case .name:
+                // Renamed last, after everything else was written under the old name.
+                break
+            case .folder, .size, .contentType:
                 break
             }
         }
         if touched {
             try target.setResourceValues(resourceValues)
         }
-        if let entry = changes[Self.nameKey], case .text(let newName)? = entry {
+        if case .text(let newName)?? = changes[FileField.name.key] {
             let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, !trimmed.contains("/"), trimmed != ".", trimmed != ".." else {
                 throw MetadataError(tr("Invalid file name"))

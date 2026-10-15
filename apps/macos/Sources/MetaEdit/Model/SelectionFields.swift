@@ -81,7 +81,7 @@ enum SelectionFields {
 
         for file in files {
             for spec in file.specs {
-                if files.count > 1, spec.key == FileAttributesProvider.nameKey { continue }
+                if files.count > 1, spec.key == FileField.name.key { continue }
                 if specs[spec.key] == nil {
                     specs[spec.key] = spec
                     order.append(spec.key)

@@ -11,20 +11,13 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Cache TagLib
-        uses: actions/cache@v4
-        with:
-          path: apps/macos/vendor/taglib
-          key: taglib-${{ runner.os }}-${{ hashFiles('apps/macos/scripts/build-taglib.sh') }}
-      - name: Build TagLib
-        run: apps/macos/scripts/build-taglib.sh
-      - name: Run tests
-        run: apps/macos/scripts/test.sh
+      - uses: ./.github/actions/macos-test
       - name: Build app
         run: apps/macos/scripts/build-app.sh
       - name: Zip app bundle
-        run: ditto -c -k --keepParent apps/macos/dist/MetaEdit.app apps/macos/dist/MetaEdit-macos.zip
+        working-directory: apps/macos/dist
+        run: for bundle in *.app; do ditto -c -k --keepParent "$bundle" "${bundle%.app}-macos.zip"; done
       - uses: actions/upload-artifact@v4
         with:
-          name: MetaEdit-macos
-          path: apps/macos/dist/MetaEdit-macos.zip
+          name: macos-app
+          path: apps/macos/dist/*-macos.zip

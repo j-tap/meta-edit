@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Builds TagLib as universal (arm64 + x86_64) static libraries for macOS.
-# Output: apps/macos/vendor/taglib/{include,lib}. Re-run is a no-op when the version matches.
+# Output: apps/macos/vendor/taglib/{include,lib}. Re-run is a no-op when the version and deployment target match.
 set -euo pipefail
+
+. "$(dirname "$0")/env.sh"
 
 TAGLIB_VERSION="2.3.2"
 TAGLIB_SHA256="3ca2d8afaa7f1cf7f6ed10e511ebc368bfacd6dcaa3dbfa690b89e502e8963dc"
-MIN_MACOS="14.0"
+MIN_MACOS="$(min_macos)"
 
-here="$(cd "$(dirname "$0")" && pwd)"
-app="$(cd "$here/.." && pwd)"
 vendor="$app/vendor/taglib"
 work="${TAGLIB_BUILD_DIR:-${TMPDIR:-/tmp}/taglib-build-$TAGLIB_VERSION}"
+# Rebuilt when either the TagLib version or the deployment target changes.
+stamp="$TAGLIB_VERSION macOS $MIN_MACOS"
 
-if [[ -f "$vendor/lib/libtag_c.a" && -f "$vendor/.version" && "$(cat "$vendor/.version")" == "$TAGLIB_VERSION" ]]; then
-  echo "TagLib $TAGLIB_VERSION already built in $vendor"
+if [[ -f "$vendor/lib/libtag_c.a" && -f "$vendor/.version" && "$(cat "$vendor/.version")" == "$stamp" ]]; then
+  echo "TagLib $TAGLIB_VERSION for macOS $MIN_MACOS already built in $vendor"
   exit 0
 fi
 
@@ -41,5 +43,5 @@ cmake -S "taglib-$TAGLIB_VERSION" -B build \
   -DCMAKE_INSTALL_LIBDIR=lib
 cmake --build build --parallel "$(sysctl -n hw.ncpu)"
 cmake --install build
-echo "$TAGLIB_VERSION" > "$vendor/.version"
+echo "$stamp" > "$vendor/.version"
 echo "TagLib $TAGLIB_VERSION installed to $vendor"

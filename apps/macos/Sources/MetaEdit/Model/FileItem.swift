@@ -10,9 +10,13 @@ final class FileItem: Identifiable {
     let id = UUID()
     private(set) var url: URL
     private(set) var providers: [any MetadataProvider] = []
-    private(set) var specs: [FieldSpec] = []
-    /// Provider id that owns each field (General fields are shared keys, so the owner is not in the key).
-    private(set) var owners: [FieldKey: String] = [:]
+    private(set) var specs: [FieldSpec] = [] {
+        didSet { specsByKey = Dictionary(specs.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first }) }
+    }
+    /// The same specs by key: views look fields up for every selected file on every render.
+    @ObservationIgnored private var specsByKey: [FieldKey: FieldSpec] = [:]
+    /// Provider that owns each field (General fields are shared keys, so the owner is not in the key).
+    private(set) var owners: [FieldKey: ProviderID] = [:]
     private(set) var values: [FieldKey: FieldValue] = [:]
     /// Staged changes. A key present with a nil value means "remove this tag".
     private(set) var staged: [FieldKey: FieldValue?] = [:]
@@ -26,15 +30,22 @@ final class FileItem: Identifiable {
     var name: String { url.lastPathComponent }
     var directory: String { url.deletingLastPathComponent().path }
     var isDirty: Bool { !staged.isEmpty }
-    var icon: NSImage { NSWorkspace.shared.icon(forFile: url.path) }
+    /// Finder icon of the file, looked up once per path because list rows ask for it on every render.
+    var icon: NSImage {
+        if let cachedIcon, cachedIcon.url == url { return cachedIcon.image }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        cachedIcon = (url, image)
+        return image
+    }
+    @ObservationIgnored private var cachedIcon: (url: URL, image: NSImage)?
 
     // MARK: Reading
 
     /// What a read of the file found.
-    struct Snapshot {
+    struct Snapshot: Sendable {
         var providers: [any MetadataProvider] = []
         var specs: [FieldSpec] = []
-        var owners: [FieldKey: String] = [:]
+        var owners: [FieldKey: ProviderID] = [:]
         var values: [FieldKey: FieldValue] = [:]
         var isWritable = true
         var error: String?
@@ -87,8 +98,8 @@ final class FileItem: Identifiable {
 
     // MARK: Editing
 
-    func spec(for key: FieldKey) -> FieldSpec? { specs.first { $0.key == key } }
-    func supports(_ key: FieldKey) -> Bool { specs.contains { $0.key == key } }
+    func spec(for key: FieldKey) -> FieldSpec? { specsByKey[key] }
+    func supports(_ key: FieldKey) -> Bool { specsByKey[key] != nil }
 
     /// Value as the user currently sees it: staged change if any, otherwise what is on disk.
     func currentValue(for key: FieldKey) -> FieldValue? {
@@ -113,10 +124,10 @@ final class FileItem: Identifiable {
     // MARK: Saving
 
     /// Changes captured on the main actor, so the write itself can run in the background.
-    private struct WritePlan {
+    private struct WritePlan: Sendable {
         let url: URL
         let providers: [any MetadataProvider]
-        let owners: [FieldKey: String]
+        let owners: [FieldKey: ProviderID]
         let changes: [FieldKey: FieldValue?]
         let preserveModificationDate: Bool
 

@@ -60,7 +60,8 @@ Not yet: ExifTool integration, PDF and Office documents, Markdown front matter, 
   files: string catalogs need Xcode to compile, and in-code tables switch language at runtime. English strings
   are the keys. `build-app.sh` adds empty `.lproj` folders and `CFBundleLocalizations` so that the menus macOS
   provides are localized too; picking a language in Settings writes `AppleLanguages` for the app, which those
-  menus read at launch. `translationsAreComplete` scans the sources and fails on a missing key.
+  menus read at launch. `translationsAreComplete` collects the `tr()` calls in the sources and every field
+  label, and fails on a missing or unused key.
 - The setter of `URLResourceValues.tagNames` needs macOS 26, so Finder tags are written as the
   `com.apple.metadata:_kMDItemUserTags` attribute, preserving tag colours.
 
@@ -72,6 +73,24 @@ Sources/CTagLib/         module map for the TagLib C API
 Sources/MetaEdit/        App, Model, Providers, Views, Support
 Tests/MetaEditTests/     Swift Testing suite and generated fixtures
 Resources/               Info.plist, AppIcon.icns
-scripts/                 build-taglib, build-app, make-dmg, make-icon, make-samples, test
+scripts/                 build-taglib, build-app, make-dmg, make-icon, make-samples, test; env.sh shared by them
 vendor/                  TagLib build output, not committed
 ```
+
+## How the code fits together
+
+- Swift 6 language mode with complete concurrency checking. Providers are stateless `Sendable` structs:
+  `FileItem.read` runs them off the main thread and returns a `Snapshot`, which `FileItem` applies on the main
+  actor. Saves work the same way. `AppState` queues loads and saves (`SerialTaskQueue`) so they never overlap.
+  Within a load, files are read several at a time (`mapConcurrently`) and join the list in order.
+- A field is identified by `FieldKey`, an enum: `.general` fields are shared between providers, `.file`,
+  `.tagLib` and `.image` belong to one provider, and raw tags carry the name their container uses. Labels,
+  groups and kinds are defined once in the field enums (`Model/GeneralField.swift`, `Model/ProviderFields.swift`);
+  providers only map those fields onto their containers.
+- `Localizer` is thread safe, since providers translate error messages in the background, and observable, so
+  views re-render when the language changes.
+- Each build setting has one source. The version is in `VERSION`, the minimum macOS version in the platforms of
+  `Package.swift`, and the app name, bundle identifier, icon and languages in `Resources/Info.plist`.
+  `scripts/env.sh` reads them for the other scripts, and `build-app.sh` fills the `__VERSION__` and
+  `__MIN_MACOS__` placeholders of the Info.plist. Tests check that `AppLanguage` matches the Info.plist languages.
+- Keyboard shortcuts are defined once in `Support/Shortcut.swift`; menus and help texts both use them.

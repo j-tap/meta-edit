@@ -139,65 +139,46 @@ struct FieldRow: View {
         return trimmed.isEmpty || Int(trimmed) != nil
     }
 
-    private func commitText(_ text: String) {
-        if text.isEmpty {
-            // Clearing a field whose values differ goes back to "multiple values" instead of deleting everywhere.
-            if case .mixed = field.original {
-                state.revert(key, in: files)
-            } else {
-                state.stage(nil, for: key, in: files)
-            }
+    /// Stages `value` for the selected files. An empty value removes the field, except where the files'
+    /// values differ: clearing such a field goes back to "multiple values" instead of deleting it everywhere.
+    private func commit(_ value: FieldValue) {
+        if !value.isEmpty {
+            state.stage(value, for: key, in: files)
+        } else if case .mixed = field.original {
+            state.revert(key, in: files)
         } else {
-            state.stage(.text(text), for: key, in: files)
+            state.stage(nil, for: key, in: files)
         }
+    }
+
+    private func commitText(_ text: String) { commit(.text(text)) }
+    private func commitList(_ text: String) { commit(.list(Self.items(text.split(separator: ",")))) }
+    private func commitLines(_ text: String) { commit(.list(Self.items(text.split(whereSeparator: \.isNewline)))) }
+
+    private static func items(_ parts: [Substring]) -> [String] {
+        parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     private var linesText: String {
         if case .list(let items)? = field.displayValue { return items.joined(separator: "\n") }
         return currentText
     }
-
-    private func commitList(_ text: String) {
-        commitItems(text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
-    }
-
-    private func commitLines(_ text: String) {
-        commitItems(text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) })
-    }
-
-    private func commitItems(_ items: [String]) {
-        let items = items.filter { !$0.isEmpty }
-        if items.isEmpty {
-            if case .mixed = field.original {
-                state.revert(key, in: files)
-            } else {
-                state.stage(nil, for: key, in: files)
-            }
-        } else {
-            state.stage(.list(items), for: key, in: files)
-        }
-    }
 }
 
-/// Text field that keeps a local draft while focused, so normalisation of the model value never fights the cursor.
-struct DraftTextField: View {
+/// Keeps a local draft while its control is focused, so normalisation of the model value never fights the cursor.
+/// A draft that fails `isValid` is not passed on, and `content` is told so it can mark it; leaving the control
+/// restores the value.
+struct DraftEditing<Content: View>: View {
     let value: String
-    let prompt: Text?
-    /// A draft that fails this check gets a red outline and is not passed on; leaving the field restores the value.
     var isValid: (String) -> Bool = { _ in true }
     let onChange: (String) -> Void
+    @ViewBuilder let content: (_ draft: Binding<String>, _ isInvalid: Bool) -> Content
     @ViewState private var draft = ""
     @ViewState private var isInvalid = false
     @FocusState private var focused: Bool
 
     var body: some View {
-        TextField("", text: $draft, prompt: prompt)
-            .textFieldStyle(.roundedBorder)
-            .overlay {
-                if isInvalid {
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(.red)
-                }
-            }
+        content($draft, isInvalid)
             .focused($focused)
             .onAppear { draft = value }
             .onChange(of: value) { _, new in
@@ -217,42 +198,50 @@ struct DraftTextField: View {
     }
 }
 
+struct DraftTextField: View {
+    let value: String
+    let prompt: Text?
+    var isValid: (String) -> Bool = { _ in true }
+    let onChange: (String) -> Void
+
+    var body: some View {
+        DraftEditing(value: value, isValid: isValid, onChange: onChange) { draft, isInvalid in
+            TextField("", text: draft, prompt: prompt)
+                .textFieldStyle(.roundedBorder)
+                .overlay {
+                    if isInvalid {
+                        RoundedRectangle(cornerRadius: 5).strokeBorder(.red)
+                    }
+                }
+        }
+    }
+}
+
 struct DraftTextEditor: View {
     let value: String
     let placeholder: String
     let onChange: (String) -> Void
-    @ViewState private var draft = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
-        TextEditor(text: $draft)
-            .font(.body)
-            .scrollContentBackground(.hidden)
-            .padding(4)
-            .frame(height: 72)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
-            .overlay(alignment: .topLeading) {
-                if draft.isEmpty, !placeholder.isEmpty {
-                    Text(placeholder)
-                        .italic()
-                        .foregroundStyle(.tertiary)
-                        .padding(.leading, 9)
-                        .padding(.top, 5)
-                        .allowsHitTesting(false)
+        DraftEditing(value: value, onChange: onChange) { draft, _ in
+            TextEditor(text: draft)
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(4)
+                .frame(height: 72)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor)))
+                .overlay(alignment: .topLeading) {
+                    if draft.wrappedValue.isEmpty, !placeholder.isEmpty {
+                        Text(placeholder)
+                            .italic()
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 9)
+                            .padding(.top, 5)
+                            .allowsHitTesting(false)
+                    }
                 }
-            }
-            .focused($focused)
-            .onAppear { draft = value }
-            .onChange(of: value) { _, new in
-                if !focused { draft = new }
-            }
-            .onChange(of: draft) { _, new in
-                if focused, new != value { onChange(new) }
-            }
-            .onChange(of: focused) { _, isFocused in
-                if !isFocused { draft = value }
-            }
+        }
     }
 }
 
@@ -260,12 +249,15 @@ struct MixedValuesPopover: View {
     let values: [ValueCount]
     let onPick: (FieldValue?) -> Void
 
+    /// Values listed before "and N more".
+    private static let visibleCount = 10
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(tr("Values in the selected files"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            ForEach(Array(values.prefix(10).enumerated()), id: \.offset) { _, entry in
+            ForEach(Array(values.prefix(Self.visibleCount).enumerated()), id: \.offset) { _, entry in
                 Button {
                     onPick(entry.value)
                 } label: {
@@ -281,8 +273,8 @@ struct MixedValuesPopover: View {
                 }
                 .buttonStyle(.plain)
             }
-            if values.count > 10 {
-                Text(tr("and %d more", values.count - 10))
+            if values.count > Self.visibleCount {
+                Text(tr("and %d more", values.count - Self.visibleCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -300,11 +292,13 @@ struct CoverField: View {
     let field: FieldState
     let files: [FileItem]
     @ViewState private var isTargeted = false
+    /// The decoded cover, updated when its bytes change rather than on every render.
+    @ViewState private var image: NSImage?
 
     private var key: FieldKey { field.spec.key }
 
-    private var image: NSImage? {
-        if case .image(let data, _)? = field.displayValue { return NSImage(data: data) }
+    private var coverData: Data? {
+        if case .image(let data, _)? = field.displayValue { return data }
         return nil
     }
 
@@ -356,6 +350,9 @@ struct CoverField: View {
             }
             .controlSize(.small)
         }
+        .onChange(of: coverData, initial: true) { _, data in
+            image = data.flatMap(NSImage.init(data:))
+        }
     }
 
     private func load(_ url: URL) throws {
@@ -363,7 +360,7 @@ struct CoverField: View {
         guard NSImage(data: data) != nil else {
             throw MetadataError(tr("%@ is not an image", url.lastPathComponent))
         }
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/jpeg"
+        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? FieldValue.fallbackImageMIMEType
         state.stage(.image(data, mime: mime), for: key, in: files)
     }
 
@@ -382,9 +379,11 @@ struct CoverField: View {
     private func export() {
         guard case .image(let data, let mime)? = field.displayValue else { return }
         let panel = NSSavePanel()
-        let ext = UTType(mimeType: mime)?.preferredFilenameExtension ?? "jpg"
-        let base = files.first?.url.deletingPathExtension().lastPathComponent ?? "cover"
-        panel.nameFieldStringValue = "\(base).\(ext)"
+        // The panel adds the extension of the allowed type to the name.
+        if let type = UTType(mimeType: mime) ?? UTType(mimeType: FieldValue.fallbackImageMIMEType) {
+            panel.allowedContentTypes = [type]
+        }
+        panel.nameFieldStringValue = files.first?.url.deletingPathExtension().lastPathComponent ?? ""
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try data.write(to: url, options: .atomic)

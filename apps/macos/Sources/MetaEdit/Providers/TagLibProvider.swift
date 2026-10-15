@@ -3,129 +3,127 @@ import Foundation
 
 /// Audio and MP4/Matroska tags through the TagLib C API. Uses TagLib's unified property map, so the
 /// same keys work for ID3v2, Vorbis comments, MP4 atoms, APE, ASF and Matroska tags.
-final class TagLibProvider: MetadataProvider {
-    let id = "taglib"
-
-    private static let extensions: Set<String> = [
-        "mp3", "mp2", "flac", "ogg", "oga", "opus", "spx", "m4a", "m4b", "m4p", "m4r", "mp4", "m4v", "3g2", "3gp",
-        "wav", "aif", "aiff", "aifc", "ape", "mpc", "wv", "tta", "wma", "asf", "dsf", "dff", "dsdiff", "shn",
-        "mkv", "mka", "webm", "mod", "s3m", "it", "xm",
-    ]
-
-    private static let videoExtensions: Set<String> = ["mp4", "m4v", "3g2", "3gp", "mkv", "webm"]
+struct TagLibProvider: MetadataProvider {
+    let id = ProviderID.tagLib
 
     private static let pictureKey = "PICTURE"
 
-    private enum Family { case id3, vorbis, mp4, ape, asf, matroska, other }
+    /// TagLib's C API settings are global, so they are applied once, before the first file is opened.
+    private static let configureTagLib: Void = {
+        taglib_set_strings_unicode(1)
+        taglib_id3v2_set_default_text_encoding(TagLib_ID3v2_UTF8)
+    }()
 
-    private struct Mapping {
-        let id: String
-        let label: String
-        let group: FieldGroup
-        let kind: FieldKind
-        let key: String
-        /// Categories that get a non-General field. General fields follow GeneralField.fields(for:).
-        var categories: Set<MediaCategory> = [.audio]
-        /// Containers that have a place for the field; nil means all.
+    // MARK: Formats
+
+    private enum Family: Sendable { case id3, vorbis, mp4, ape, asf, matroska, other }
+
+    private struct Format: Sendable {
+        let family: Family
+        let category: MediaCategory
+    }
+
+    /// Supported file extensions, with the tag family and what the editor treats them as.
+    private static let formats: [String: Format] = {
+        let groups: [(Family, MediaCategory, [String])] = [
+            (.id3, .audio, ["mp3", "mp2", "wav", "aif", "aiff", "aifc", "dsf", "dff", "dsdiff"]),
+            (.vorbis, .audio, ["flac", "ogg", "oga", "opus", "spx"]),
+            (.mp4, .audio, ["m4a", "m4b", "m4p", "m4r"]),
+            (.mp4, .video, ["mp4", "m4v", "3g2", "3gp"]),
+            (.ape, .audio, ["ape", "mpc", "wv", "tta", "shn"]),
+            (.asf, .audio, ["wma", "asf"]),
+            (.matroska, .audio, ["mka"]),
+            (.matroska, .video, ["mkv", "webm"]),
+            (.other, .audio, ["mod", "s3m", "it", "xm"]),
+        ]
+        return Dictionary(uniqueKeysWithValues: groups.flatMap { family, category, extensions in
+            extensions.map { ($0, Format(family: family, category: category)) }
+        })
+    }()
+
+    private static func format(of url: URL) -> Format? {
+        formats[url.pathExtension.lowercased()]
+    }
+
+    // MARK: Fields
+
+    /// Where a field lives in TagLib's property map.
+    private struct Mapping: Sendable {
+        let field: any FieldDefinition
+        let property: String
+        /// Property used instead of `property` by some tag families.
+        var propertyByFamily: [Family: String]
+        /// Properties read, in order, when the file has no `property`.
+        var fallbacks: [String]
+        /// For "n/total" fields, the properties that may hold the total; the first one is written.
+        var totals: [String]
+        /// Categories that get a TagLib field. General fields follow GeneralField.fields(for:).
+        var categories: Set<MediaCategory>
+        /// Tag families that have a place for the field; nil means all.
         var families: Set<Family>?
 
-        init(id: String, label: String, group: FieldGroup, kind: FieldKind, key: String,
-             categories: Set<MediaCategory> = [.audio], families: Set<Family>? = nil) {
-            self.id = id
-            self.label = label
-            self.group = group
-            self.kind = kind
-            self.key = key
+        init(_ field: any FieldDefinition, _ property: String, propertyByFamily: [Family: String] = [:],
+             fallbacks: [String] = [], totals: [String] = [], categories: Set<MediaCategory> = [.audio],
+             families: Set<Family>? = nil) {
+            self.field = field
+            self.property = property
+            self.propertyByFamily = propertyByFamily
+            self.fallbacks = fallbacks
+            self.totals = totals
             self.categories = categories
             self.families = families
         }
 
-        init(_ field: GeneralField, key: String) {
-            self.init(id: field.rawValue, label: "", group: .general, kind: field.kind, key: key)
+        func applies(to format: Format) -> Bool {
+            if let families, !families.contains(format.family) { return false }
+            if case .general(let general) = field.key { return GeneralField.fields(for: format.category).contains(general) }
+            return categories.contains(format.category)
         }
 
-        var generalField: GeneralField? { group == .general ? GeneralField(rawValue: id) : nil }
-
-        func applies(to category: MediaCategory, _ family: Family) -> Bool {
-            if let families, !families.contains(family) { return false }
-            if let field = generalField { return GeneralField.fields(for: category).contains(field) }
-            return categories.contains(category)
-        }
-
-        func label(for category: MediaCategory) -> String {
-            generalField?.label(for: category) ?? label
+        func property(for family: Family) -> String {
+            propertyByFamily[family] ?? property
         }
     }
 
     private static let mappings: [Mapping] = [
-        Mapping(.title, key: "TITLE"),
-        Mapping(.artist, key: "ARTIST"),
-        Mapping(.album, key: "ALBUM"),
-        Mapping(.albumArtist, key: "ALBUMARTIST"),
-        Mapping(.date, key: "DATE"),
-        Mapping(.genre, key: "GENRE"),
-        Mapping(.track, key: "TRACKNUMBER"),
-        Mapping(.disc, key: "DISCNUMBER"),
-        Mapping(.composer, key: "COMPOSER"),
-        Mapping(.comment, key: "COMMENT"),
-        Mapping(.description, key: "DESCRIPTION"),
-        Mapping(.keywords, key: "KEYWORDS"),
-        Mapping(.copyright, key: "COPYRIGHT"),
-        Mapping(id: "lyrics", label: "Lyrics", group: .audio, kind: .multiline, key: "LYRICS"),
-        Mapping(id: "bpm", label: "BPM", group: .audio, kind: .integer, key: "BPM"),
-        Mapping(id: "publisher", label: "Publisher", group: .audio, kind: .text, key: "LABEL"),
-        Mapping(id: "isrc", label: "ISRC", group: .audio, kind: .text, key: "ISRC"),
-        Mapping(id: "encodedBy", label: "Encoded by", group: .audio, kind: .text, key: "ENCODEDBY"),
-        Mapping(id: "compilation", label: "Compilation", group: .audio, kind: .boolean, key: "COMPILATION"),
-        Mapping(id: "grouping", label: "Grouping", group: .audio, kind: .text, key: "GROUPING"),
-        Mapping(id: "show", label: "TV show", group: .video, kind: .text, key: "TVSHOW", categories: [.video], families: [.mp4]),
-        Mapping(id: "season", label: "Season", group: .video, kind: .integer, key: "TVSEASON", categories: [.video], families: [.mp4]),
-        Mapping(id: "episode", label: "Episode", group: .video, kind: .integer, key: "TVEPISODE", categories: [.video], families: [.mp4]),
-        Mapping(id: "episodeId", label: "Episode ID", group: .video, kind: .text, key: "TVEPISODEID", categories: [.video], families: [.mp4]),
-        Mapping(id: "network", label: "TV network", group: .video, kind: .text, key: "TVNETWORK", categories: [.video], families: [.mp4]),
+        Mapping(GeneralField.title, "TITLE"),
+        Mapping(GeneralField.artist, "ARTIST"),
+        Mapping(GeneralField.album, "ALBUM"),
+        Mapping(GeneralField.albumArtist, "ALBUMARTIST"),
+        Mapping(GeneralField.date, "DATE"),
+        Mapping(GeneralField.genre, "GENRE"),
+        Mapping(GeneralField.track, "TRACKNUMBER", totals: ["TRACKTOTAL", "TOTALTRACKS"]),
+        Mapping(GeneralField.disc, "DISCNUMBER", totals: ["DISCTOTAL", "TOTALDISCS"]),
+        Mapping(GeneralField.composer, "COMPOSER"),
+        Mapping(GeneralField.comment, "COMMENT"),
+        // TagLib maps the MP4 "desc" atom to PODCASTDESC; it is the description iTunes and the TV app show.
+        Mapping(GeneralField.description, "DESCRIPTION", propertyByFamily: [.mp4: "PODCASTDESC"]),
+        Mapping(GeneralField.keywords, "KEYWORDS"),
+        Mapping(GeneralField.copyright, "COPYRIGHT"),
+        Mapping(TagLibField.lyrics, "LYRICS"),
+        Mapping(TagLibField.bpm, "BPM"),
+        Mapping(TagLibField.publisher, "LABEL", propertyByFamily: [.vorbis: "ORGANIZATION"],
+                fallbacks: ["ORGANIZATION", "PUBLISHER", "LABEL"]),
+        Mapping(TagLibField.isrc, "ISRC"),
+        Mapping(TagLibField.encodedBy, "ENCODEDBY"),
+        Mapping(TagLibField.compilation, "COMPILATION"),
+        Mapping(TagLibField.grouping, "GROUPING"),
+        Mapping(TagLibField.show, "TVSHOW", categories: [.video], families: [.mp4]),
+        Mapping(TagLibField.season, "TVSEASON", categories: [.video], families: [.mp4]),
+        Mapping(TagLibField.episode, "TVEPISODE", categories: [.video], families: [.mp4]),
+        Mapping(TagLibField.episodeId, "TVEPISODEID", categories: [.video], families: [.mp4]),
+        Mapping(TagLibField.network, "TVNETWORK", categories: [.video], families: [.mp4]),
     ]
 
-    init() {
-        taglib_set_strings_unicode(1)
-        taglib_id3v2_set_default_text_encoding(TagLib_ID3v2_UTF8)
-    }
+    private static let mappingsByKey = Dictionary(uniqueKeysWithValues: mappings.map { ($0.field.key, $0) })
 
     func supports(_ url: URL) -> Bool {
-        Self.extensions.contains(url.pathExtension.lowercased())
+        Self.format(of: url) != nil
     }
 
-    private func family(of url: URL) -> Family {
-        switch url.pathExtension.lowercased() {
-        case "mp3", "mp2", "wav", "aif", "aiff", "aifc", "dsf", "dff", "dsdiff": return .id3
-        case "flac", "ogg", "oga", "opus", "spx": return .vorbis
-        case "m4a", "m4b", "m4p", "m4r", "mp4", "m4v", "3g2", "3gp": return .mp4
-        case "ape", "mpc", "wv", "tta", "shn": return .ape
-        case "wma", "asf": return .asf
-        case "mkv", "mka", "webm": return .matroska
-        default: return .other
-        }
-    }
-
-    private func category(of url: URL) -> MediaCategory {
-        Self.videoExtensions.contains(url.pathExtension.lowercased()) ? .video : .audio
-    }
-
-    private func propertyKey(_ mapping: Mapping, _ family: Family) -> String {
-        if mapping.id == "publisher", family == .vorbis { return "ORGANIZATION" }
-        // TagLib maps the MP4 "desc" atom to PODCASTDESC; it is the description iTunes and the TV app show.
-        if mapping.id == "description", family == .mp4 { return "PODCASTDESC" }
-        return mapping.key
-    }
-
-    private func key(_ id: String) -> FieldKey { FieldKey(provider: self.id, id: id) }
-
-    private func key(for mapping: Mapping) -> FieldKey {
-        mapping.group == .general ? FieldKey(provider: GeneralField.providerID, id: mapping.id) : key(mapping.id)
-    }
-
-    // MARK: Read
-
-    func read(url: URL) throws -> ProviderData {
+    /// Opens the file, checks that TagLib understands it and closes it after `body`.
+    private func withFile<Result>(_ url: URL, _ body: (UnsafeMutablePointer<TagLib_File>) throws -> Result) throws -> Result {
+        _ = Self.configureTagLib
         guard let file = taglib_file_new(url.path) else {
             throw MetadataError(tr("TagLib could not open %@", url.lastPathComponent))
         }
@@ -133,67 +131,57 @@ final class TagLibProvider: MetadataProvider {
         guard taglib_file_is_valid(file) != 0 else {
             throw MetadataError(tr("Unsupported or damaged media file"))
         }
+        return try body(file)
+    }
 
-        let family = family(of: url)
-        let category = category(of: url)
-        let props = readProperties(file)
-        var data = ProviderData()
-        var order = 0
+    // MARK: Read
 
-        for mapping in Self.mappings where mapping.applies(to: category, family) {
-            var values = props[propertyKey(mapping, family)] ?? []
-            switch mapping.id {
-            case "publisher" where values.isEmpty:
-                values = props["ORGANIZATION"] ?? props["PUBLISHER"] ?? props["LABEL"] ?? []
-            case "track":
-                values = Self.withTotal(values, total: props["TRACKTOTAL"] ?? props["TOTALTRACKS"])
-            case "disc":
-                values = Self.withTotal(values, total: props["DISCTOTAL"] ?? props["TOTALDISCS"])
-            default:
-                break
+    func read(url: URL) throws -> ProviderData {
+        guard let format = Self.format(of: url) else {
+            throw MetadataError(tr("Unsupported or damaged media file"))
+        }
+        return try withFile(url) { file in
+            let props = readProperties(file)
+            var data = ProviderData()
+
+            for mapping in Self.mappings where mapping.applies(to: format) {
+                var values = props[mapping.property(for: format.family)] ?? []
+                if values.isEmpty {
+                    values = mapping.fallbacks.lazy.compactMap { props[$0] }.first ?? []
+                }
+                if !mapping.totals.isEmpty {
+                    values = Self.withTotal(values, total: mapping.totals.lazy.compactMap { props[$0] }.first)
+                }
+                data.add(mapping.field.spec(for: format.category), FieldValue(strings: values, kind: mapping.field.kind))
             }
-            let value: FieldValue?
-            switch mapping.kind {
-            case .list:
-                value = values.isEmpty ? nil : .list(values)
-            case .boolean:
-                value = values.first.map { .bool($0 == "1" || $0.lowercased() == "true") }
-            default:
-                value = values.isEmpty ? nil : .text(values.joined(separator: "; "))
+
+            if GeneralField.fields(for: format.category).contains(.cover) {
+                data.add(GeneralField.cover.spec(for: format.category), readPicture(file))
             }
-            let specOrder = mapping.generalField?.order ?? order
-            data.add(FieldSpec(key: key(for: mapping), label: mapping.label(for: category), group: mapping.group, kind: mapping.kind, order: specOrder), value)
-            order += 1
-        }
 
-        if GeneralField.fields(for: category).contains(.cover) {
-            data.add(GeneralField.cover.spec(for: category), readPicture(file))
-        }
-
-        if let properties = taglib_file_audioproperties(file) {
-            let seconds = Int(taglib_audioproperties_length(properties))
-            let technical: [(String, String, String)] = [
-                ("duration", "Duration", String(format: "%d:%02d", seconds / 60, seconds % 60)),
-                ("bitrate", "Bitrate", tr("%d kb/s", Int(taglib_audioproperties_bitrate(properties)))),
-                ("sampleRate", "Sample rate", tr("%d Hz", Int(taglib_audioproperties_samplerate(properties)))),
-                ("channels", "Channels", "\(taglib_audioproperties_channels(properties))"),
-            ]
-            for (id, label, text) in technical {
-                data.add(FieldSpec(key: key(id), label: label, group: .technical, kind: .text, writable: false, order: order), .text(text))
-                order += 1
+            if let properties = taglib_file_audioproperties(file) {
+                let seconds = Int(taglib_audioproperties_length(properties))
+                let technical: [(TagLibField, String)] = [
+                    (.duration, String(format: "%d:%02d", seconds / 60, seconds % 60)),
+                    (.bitrate, tr("%d kb/s", Int(taglib_audioproperties_bitrate(properties)))),
+                    (.sampleRate, tr("%d Hz", Int(taglib_audioproperties_samplerate(properties)))),
+                    (.channels, "\(taglib_audioproperties_channels(properties))"),
+                ]
+                for (field, text) in technical {
+                    data.add(field.spec(), .text(text))
+                }
             }
-        }
 
-        for rawKey in props.keys.sorted() {
-            let values = props[rawKey] ?? []
-            let kind: FieldKind = values.count > 1 ? .list : .text
-            data.add(
-                FieldSpec(key: key("raw:" + rawKey), label: rawKey, group: .raw, kind: kind, order: order),
-                kind == .list ? .list(values) : values.first.map(FieldValue.text)
-            )
-            order += 1
+            for (order, name) in props.keys.sorted().enumerated() {
+                let values = props[name] ?? []
+                let kind: FieldKind = values.count > 1 ? .list : .text
+                data.add(
+                    .raw(.tagLibProperty(name), label: name, kind: kind, writable: true, order: order),
+                    FieldValue(strings: values, kind: kind)
+                )
+            }
+            return data
         }
-        return data
     }
 
     private static func withTotal(_ values: [String], total: [String]?) -> [String] {
@@ -230,60 +218,57 @@ final class TagLibProvider: MetadataProvider {
         taglib_picture_from_complex_property(properties, &picture)
         guard let bytes = picture.data, picture.size > 0 else { return nil }
         let data = Data(bytes: bytes, count: Int(picture.size))
-        let mime = picture.mimeType.map { String(cString: $0) } ?? "image/jpeg"
+        let mime = picture.mimeType.map { String(cString: $0) } ?? FieldValue.fallbackImageMIMEType
         return .image(data, mime: mime)
     }
 
     // MARK: Write
 
     func write(url: URL, changes: [FieldKey: FieldValue?]) throws -> URL {
-        guard let file = taglib_file_new(url.path) else {
-            throw MetadataError(tr("TagLib could not open %@", url.lastPathComponent))
-        }
-        defer { taglib_file_free(file) }
-        guard taglib_file_is_valid(file) != 0 else {
+        guard let format = Self.format(of: url) else {
             throw MetadataError(tr("Unsupported or damaged media file"))
         }
-        let family = family(of: url)
-
-        for (fieldKey, entry) in changes {
-            let value: FieldValue? = entry
-            if fieldKey == GeneralField.cover.key {
-                try setPicture(file, value)
-                continue
-            }
-            if fieldKey.id.hasPrefix("raw:") {
-                setProperty(file, String(fieldKey.id.dropFirst(4)), value?.strings)
-                continue
-            }
-            guard let mapping = Self.mappings.first(where: { $0.id == fieldKey.id }) else { continue }
-            let propertyKey = propertyKey(mapping, family)
-            switch mapping.id {
-            case "track", "disc":
-                let totalKey = mapping.id == "track" ? "TRACKTOTAL" : "DISCTOTAL"
-                let text = value?.displayText.trimmingCharacters(in: .whitespaces) ?? ""
-                if family == .vorbis {
-                    let parts = text.split(separator: "/", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-                    setProperty(file, propertyKey, parts.first.map { [$0] })
-                    setProperty(file, totalKey, parts.count > 1 ? [parts[1]] : nil)
-                } else {
-                    setProperty(file, propertyKey, text.isEmpty ? nil : [text])
+        try withFile(url) { file in
+            for (key, value) in changes {
+                switch key {
+                case .general(.cover):
+                    try setPicture(file, value)
+                case .tagLibProperty(let name):
+                    setProperty(file, name, value?.strings)
+                default:
+                    guard let mapping = Self.mappingsByKey[key] else { continue }
+                    write(value, for: mapping, family: format.family, to: file)
                 }
-            case "compilation":
-                if case .bool(let flag)? = value {
-                    setProperty(file, propertyKey, flag ? ["1"] : nil)
-                } else {
-                    setProperty(file, propertyKey, nil)
-                }
-            default:
-                setProperty(file, propertyKey, value?.strings)
             }
-        }
-
-        guard taglib_file_save(file) != 0 else {
-            throw MetadataError(tr("TagLib could not save %@", url.lastPathComponent))
+            guard taglib_file_save(file) != 0 else {
+                throw MetadataError(tr("TagLib could not save %@", url.lastPathComponent))
+            }
         }
         return url
+    }
+
+    private func write(_ value: FieldValue?, for mapping: Mapping, family: Family, to file: UnsafeMutablePointer<TagLib_File>) {
+        let property = mapping.property(for: family)
+        if let totalProperty = mapping.totals.first {
+            // "n" or "n/total". Vorbis comments keep the total in a property of its own.
+            let text = value?.displayText.trimmingCharacters(in: .whitespaces) ?? ""
+            if family == .vorbis {
+                let parts = text.split(separator: "/", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                setProperty(file, property, parts.first.map { [$0] })
+                setProperty(file, totalProperty, parts.count > 1 ? [parts[1]] : nil)
+            } else {
+                setProperty(file, property, text.isEmpty ? nil : [text])
+            }
+        } else if mapping.field.kind == .boolean {
+            // An unset flag is removed rather than written as "0".
+            if case .bool(true)? = value {
+                setProperty(file, property, ["1"])
+            } else {
+                setProperty(file, property, nil)
+            }
+        } else {
+            setProperty(file, property, value?.strings)
+        }
     }
 
     private func setProperty(_ file: UnsafeMutablePointer<TagLib_File>, _ key: String, _ values: [String]?) {

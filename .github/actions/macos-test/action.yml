@@ -1,0 +1,17 @@
+name: macOS tests
+description: Builds TagLib (cached between runs) and runs the macOS test suite.
+runs:
+  using: composite
+  steps:
+    - name: Cache TagLib
+      uses: actions/cache@v4
+      with:
+        path: apps/macos/vendor/taglib
+        # TagLib depends on its build script and on the deployment target in Package.swift.
+        key: taglib-${{ runner.os }}-${{ hashFiles('apps/macos/scripts/build-taglib.sh', 'apps/macos/Package.swift') }}
+    - name: Build TagLib
+      shell: bash
+      run: apps/macos/scripts/build-taglib.sh
+    - name: Run tests
+      shell: bash
+      run: apps/macos/scripts/test.sh

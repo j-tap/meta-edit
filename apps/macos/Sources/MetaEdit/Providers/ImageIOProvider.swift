@@ -8,97 +8,93 @@ import UniformTypeIdentifiers
 /// Two ImageIO quirks are handled here: an XMP packet is only serialised when the `iio:hasXMP`
 /// marker tag is present, and the IPTC IIM block is regenerated from XMP on write, so IPTC-only
 /// values are mirrored into XMP before writing to keep them.
-final class ImageIOProvider: MetadataProvider {
-    let id = "imageio"
+struct ImageIOProvider: MetadataProvider {
+    let id = ProviderID.imageIO
 
     private static let readableTypes = Set((CGImageSourceCopyTypeIdentifiers() as? [String]) ?? [])
     private static let writableTypes = Set((CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? [])
-    private static let iioNamespace = "http://ns.apple.com/ImageIO/1.0/" as CFString
+    // Core Foundation strings are not Sendable, so the static tables below hold Swift strings.
+    private static let iioNamespace = "http://ns.apple.com/ImageIO/1.0/"
 
-    private static let namespaces: [String: CFString] = [
-        "dc": kCGImageMetadataNamespaceDublinCore,
-        "xmp": kCGImageMetadataNamespaceXMPBasic,
-        "xmpRights": kCGImageMetadataNamespaceXMPRights,
-        "photoshop": kCGImageMetadataNamespacePhotoshop,
-        "exif": kCGImageMetadataNamespaceExif,
-        "exifEX": kCGImageMetadataNamespaceExifEX,
-        "aux": kCGImageMetadataNamespaceExifAux,
-        "tiff": kCGImageMetadataNamespaceTIFF,
-        "Iptc4xmpCore": kCGImageMetadataNamespaceIPTCCore,
+    private static let namespaces: [String: String] = [
+        "dc": kCGImageMetadataNamespaceDublinCore as String,
+        "xmp": kCGImageMetadataNamespaceXMPBasic as String,
+        "xmpRights": kCGImageMetadataNamespaceXMPRights as String,
+        "photoshop": kCGImageMetadataNamespacePhotoshop as String,
+        "exif": kCGImageMetadataNamespaceExif as String,
+        "exifEX": kCGImageMetadataNamespaceExifEX as String,
+        "aux": kCGImageMetadataNamespaceExifAux as String,
+        "tiff": kCGImageMetadataNamespaceTIFF as String,
+        "Iptc4xmpCore": kCGImageMetadataNamespaceIPTCCore as String,
     ]
 
-    private enum XMPShape { case text, langAlt, seq, bag }
+    private enum XMPShape: Sendable { case text, langAlt, seq, bag }
 
-    private struct Mapping {
-        let id: String
-        let label: String
-        let group: FieldGroup
-        let kind: FieldKind
+    /// A value in one of ImageIO's property dictionaries, such as the IPTC object name.
+    private struct PropertyPath: Sendable {
+        let dictionary: String
+        let key: String
+
+        func strings(in properties: [CFString: Any]) -> [String] {
+            guard let values = properties[dictionary as CFString] as? [CFString: Any] else { return [] }
+            return ImageIOProvider.strings(from: values[key as CFString] as CFTypeRef?)
+        }
+    }
+
+    /// Where a field lives: an XMP path, read with an Exif or IPTC fallback.
+    private struct Mapping: Sendable {
+        let field: any FieldDefinition
         let path: String
         let shape: XMPShape
-        let fallback: (dictionary: CFString, key: CFString)?
+        let fallback: PropertyPath?
 
-        init(id: String, label: String, group: FieldGroup, kind: FieldKind, path: String, shape: XMPShape,
-             fallback: (dictionary: CFString, key: CFString)?) {
-            self.id = id
-            self.label = label
-            self.group = group
-            self.kind = kind
+        init(_ field: any FieldDefinition, path: String, shape: XMPShape, fallback: (dictionary: CFString, key: CFString)?) {
+            self.field = field
             self.path = path
             self.shape = shape
-            self.fallback = fallback
+            self.fallback = fallback.map { PropertyPath(dictionary: $0.dictionary as String, key: $0.key as String) }
         }
-
-        init(_ field: GeneralField, path: String, shape: XMPShape, fallback: (dictionary: CFString, key: CFString)?) {
-            self.init(id: field.rawValue, label: field.label(for: .image), group: .general, kind: field.kind, path: path, shape: shape, fallback: fallback)
-        }
-
-        var key: FieldKey {
-            group == .general ? FieldKey(provider: GeneralField.providerID, id: id) : FieldKey(provider: "imageio", id: id)
-        }
-
-        var order: Int? { group == .general ? GeneralField(rawValue: id)?.order : nil }
     }
 
     private static let mappings: [Mapping] = [
-        Mapping(.title, path: "dc:title", shape: .langAlt,
+        Mapping(GeneralField.title, path: "dc:title", shape: .langAlt,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCObjectName)),
-        Mapping(.artist, path: "dc:creator", shape: .seq,
+        Mapping(GeneralField.artist, path: "dc:creator", shape: .seq,
                 fallback: (kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFArtist)),
-        Mapping(.description, path: "dc:description", shape: .langAlt,
+        Mapping(GeneralField.description, path: "dc:description", shape: .langAlt,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCCaptionAbstract)),
-        Mapping(.keywords, path: "dc:subject", shape: .bag,
+        Mapping(GeneralField.keywords, path: "dc:subject", shape: .bag,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCKeywords)),
-        Mapping(.copyright, path: "dc:rights", shape: .langAlt,
+        Mapping(GeneralField.copyright, path: "dc:rights", shape: .langAlt,
                 fallback: (kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFCopyright)),
-        Mapping(.date, path: "photoshop:DateCreated", shape: .text,
+        Mapping(GeneralField.date, path: "photoshop:DateCreated", shape: .text,
                 fallback: (kCGImagePropertyExifDictionary, kCGImagePropertyExifDateTimeOriginal)),
-        Mapping(.rating, path: "xmp:Rating", shape: .text, fallback: nil),
-        Mapping(id: "headline", label: "Headline", group: .photo, kind: .text, path: "photoshop:Headline", shape: .text,
+        Mapping(GeneralField.rating, path: "xmp:Rating", shape: .text, fallback: nil),
+        Mapping(ImageField.headline, path: "photoshop:Headline", shape: .text,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCHeadline)),
-        Mapping(id: "credit", label: "Credit", group: .photo, kind: .text, path: "photoshop:Credit", shape: .text,
+        Mapping(ImageField.credit, path: "photoshop:Credit", shape: .text,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCCredit)),
-        Mapping(id: "source", label: "Source", group: .photo, kind: .text, path: "photoshop:Source", shape: .text,
+        Mapping(ImageField.source, path: "photoshop:Source", shape: .text,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCSource)),
-        Mapping(id: "city", label: "City", group: .photo, kind: .text, path: "photoshop:City", shape: .text,
+        Mapping(ImageField.city, path: "photoshop:City", shape: .text,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCCity)),
-        Mapping(id: "state", label: "State", group: .photo, kind: .text, path: "photoshop:State", shape: .text,
+        Mapping(ImageField.state, path: "photoshop:State", shape: .text,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCProvinceState)),
-        Mapping(id: "country", label: "Country", group: .photo, kind: .text, path: "photoshop:Country", shape: .text,
+        Mapping(ImageField.country, path: "photoshop:Country", shape: .text,
                 fallback: (kCGImagePropertyIPTCDictionary, kCGImagePropertyIPTCCountryPrimaryLocationName)),
-        Mapping(id: "label", label: "Label", group: .photo, kind: .text, path: "xmp:Label", shape: .text, fallback: nil),
-        Mapping(id: "software", label: "Software", group: .photo, kind: .text, path: "xmp:CreatorTool", shape: .text,
+        Mapping(ImageField.colorLabel, path: "xmp:Label", shape: .text, fallback: nil),
+        Mapping(ImageField.software, path: "xmp:CreatorTool", shape: .text,
                 fallback: (kCGImagePropertyTIFFDictionary, kCGImagePropertyTIFFSoftware)),
-        Mapping(id: "userComment", label: "User comment", group: .photo, kind: .multiline, path: "exif:UserComment", shape: .text,
+        Mapping(ImageField.userComment, path: "exif:UserComment", shape: .text,
                 fallback: (kCGImagePropertyExifDictionary, kCGImagePropertyExifUserComment)),
     ]
+
+    private static let mappingsByKey = Dictionary(uniqueKeysWithValues: mappings.map { ($0.field.key, $0) })
 
     func supports(_ url: URL) -> Bool {
         guard let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image) else { return false }
         return Self.readableTypes.contains(type.identifier)
     }
-
-    private func key(_ id: String) -> FieldKey { FieldKey(provider: self.id, id: id) }
 
     // MARK: Read
 
@@ -112,26 +108,18 @@ final class ImageIOProvider: MetadataProvider {
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
 
         var data = ProviderData()
-        var order = 0
         for mapping in Self.mappings {
             let strings = Self.currentStrings(for: mapping, metadata: metadata, properties: properties)
-            let value: FieldValue?
-            if mapping.kind == .list {
-                value = strings.isEmpty ? nil : .list(strings)
-            } else {
-                value = strings.isEmpty ? nil : .text(strings.joined(separator: "; "))
-            }
-            data.add(FieldSpec(key: mapping.key, label: mapping.label, group: mapping.group, kind: mapping.kind, writable: writable, order: mapping.order ?? order), value)
-            order += 1
+            data.add(mapping.field.spec(for: .image, writable: writable), FieldValue(strings: strings, kind: mapping.field.kind))
         }
 
-        for (id, label, text) in Self.technical(properties) {
-            data.add(FieldSpec(key: key(id), label: label, group: .technical, kind: .text, writable: false, order: order), .text(text))
-            order += 1
+        for (field, text) in Self.technical(properties) {
+            data.add(field.spec(), .text(text))
         }
 
+        // Raw tags keep the order they are added in: XMP by path, then IPTC by name.
         if let metadata {
-            var raw: [(String, FieldValue, FieldKind)] = []
+            var tags: [(path: String, strings: [String], kind: FieldKind)] = []
             CGImageMetadataEnumerateTagsUsingBlock(metadata, nil, nil) { path, tag in
                 let path = path as String
                 guard !path.hasPrefix("iio:") else { return true }
@@ -139,29 +127,26 @@ final class ImageIOProvider: MetadataProvider {
                 guard !strings.isEmpty else { return true }
                 switch CGImageMetadataTagGetType(tag) {
                 case .string, .default, .alternateText:
-                    raw.append((path, .text(strings.joined(separator: "; ")), .text))
+                    tags.append((path, strings, .text))
                 case .arrayOrdered, .arrayUnordered, .alternateArray:
-                    raw.append((path, .list(strings), .list))
+                    tags.append((path, strings, .list))
                 default:
                     break
                 }
                 return true
             }
-            for (path, value, kind) in raw.sorted(by: { $0.0 < $1.0 }) {
-                data.add(FieldSpec(key: key("xmp:" + path), label: path, group: .raw, kind: kind, writable: writable, order: order), value)
-                order += 1
+            for tag in tags.sorted(by: { $0.path < $1.path }) {
+                data.add(.raw(.xmp(tag.path), label: tag.path, kind: tag.kind, writable: writable, order: data.specs.count),
+                         FieldValue(strings: tag.strings, kind: tag.kind))
             }
         }
         if let iptc = properties[kCGImagePropertyIPTCDictionary] as? [CFString: Any] {
             for (name, value) in iptc.sorted(by: { ($0.key as String) < ($1.key as String) }) {
                 let strings = Self.strings(from: value as CFTypeRef?)
                 guard !strings.isEmpty else { continue }
-                let label = "IPTC " + (name as String)
-                data.add(
-                    FieldSpec(key: key("iptc:" + (name as String)), label: label, group: .raw, kind: strings.count > 1 ? .list : .text, writable: false, order: order),
-                    strings.count > 1 ? .list(strings) : .text(strings[0])
-                )
-                order += 1
+                let kind: FieldKind = strings.count > 1 ? .list : .text
+                data.add(.raw(.iptc(name as String), label: "IPTC " + (name as String), kind: kind, writable: false, order: data.specs.count),
+                         FieldValue(strings: strings, kind: kind))
             }
         }
         return data
@@ -173,10 +158,7 @@ final class ImageIOProvider: MetadataProvider {
             let strings = strings(from: CGImageMetadataTagCopyValue(tag))
             if !strings.isEmpty { return strings }
         }
-        if let fallback = mapping.fallback, let dictionary = properties[fallback.dictionary] as? [CFString: Any] {
-            return strings(from: dictionary[fallback.key] as CFTypeRef?)
-        }
-        return []
+        return mapping.fallback?.strings(in: properties) ?? []
     }
 
     private static func strings(from value: CFTypeRef?) -> [String] {
@@ -200,23 +182,23 @@ final class ImageIOProvider: MetadataProvider {
         }
     }
 
-    private static func technical(_ properties: [CFString: Any]) -> [(String, String, String)] {
-        var result: [(String, String, String)] = []
+    private static func technical(_ properties: [CFString: Any]) -> [(ImageField, String)] {
+        var result: [(ImageField, String)] = []
         if let width = properties[kCGImagePropertyPixelWidth] as? Int, let height = properties[kCGImagePropertyPixelHeight] as? Int {
-            result.append(("dimensions", "Dimensions", "\(width) × \(height)"))
+            result.append((.dimensions, "\(width) × \(height)"))
         }
         if let dpi = properties[kCGImagePropertyDPIWidth] as? Double, dpi > 0 {
-            result.append(("dpi", "Resolution", "\(Int(dpi.rounded())) dpi"))
+            result.append((.resolution, "\(Int(dpi.rounded())) dpi"))
         }
         if let model = properties[kCGImagePropertyColorModel] as? String {
             let depth = (properties[kCGImagePropertyDepth] as? Int).map { " \($0)-bit" } ?? ""
-            result.append(("colorModel", "Color", model + depth))
+            result.append((.colorModel, model + depth))
         }
         if let profile = properties[kCGImagePropertyProfileName] as? String {
-            result.append(("profile", "Color profile", profile))
+            result.append((.colorProfile, profile))
         }
         if let orientation = properties[kCGImagePropertyOrientation] as? Int, orientation != 1 {
-            result.append(("orientation", "Orientation", "\(orientation)"))
+            result.append((.orientation, "\(orientation)"))
         }
         let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] ?? [:]
         let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] ?? [:]
@@ -224,10 +206,10 @@ final class ImageIOProvider: MetadataProvider {
         let model = tiff[kCGImagePropertyTIFFModel] as? String ?? ""
         if !make.isEmpty || !model.isEmpty {
             let camera = model.hasPrefix(make) ? model : [make, model].filter { !$0.isEmpty }.joined(separator: " ")
-            result.append(("camera", "Camera", camera))
+            result.append((.camera, camera))
         }
         if let lens = exif[kCGImagePropertyExifLensModel] as? String, !lens.isEmpty {
-            result.append(("lens", "Lens", lens))
+            result.append((.lens, lens))
         }
         var exposure: [String] = []
         if let time = exif[kCGImagePropertyExifExposureTime] as? Double, time > 0 {
@@ -243,14 +225,14 @@ final class ImageIOProvider: MetadataProvider {
             exposure.append(String(format: "%g mm", focal))
         }
         if !exposure.isEmpty {
-            result.append(("exposure", "Exposure", exposure.joined(separator: ", ")))
+            result.append((.exposure, exposure.joined(separator: ", ")))
         }
         if let gps = properties[kCGImagePropertyGPSDictionary] as? [CFString: Any],
            let latitude = gps[kCGImagePropertyGPSLatitude] as? Double,
            let longitude = gps[kCGImagePropertyGPSLongitude] as? Double {
             let latitudeSign = (gps[kCGImagePropertyGPSLatitudeRef] as? String) == "S" ? -1.0 : 1.0
             let longitudeSign = (gps[kCGImagePropertyGPSLongitudeRef] as? String) == "W" ? -1.0 : 1.0
-            result.append(("gps", "GPS", String(format: "%.5f, %.5f", latitude * latitudeSign, longitude * longitudeSign)))
+            result.append((.gps, String(format: "%.5f, %.5f", latitude * latitudeSign, longitude * longitudeSign)))
         }
         return result
     }
@@ -271,34 +253,29 @@ final class ImageIOProvider: MetadataProvider {
         }
         var error: Unmanaged<CFError>?
         for (prefix, namespace) in Self.namespaces {
-            _ = CGImageMetadataRegisterNamespaceForPrefix(metadata, namespace, prefix as CFString, &error)
+            _ = CGImageMetadataRegisterNamespaceForPrefix(metadata, namespace as CFString, prefix as CFString, &error)
             error = nil
         }
         if CGImageMetadataCopyTagWithPath(metadata, nil, "iio:hasXMP" as CFString) == nil {
-            _ = CGImageMetadataRegisterNamespaceForPrefix(metadata, Self.iioNamespace, "iio" as CFString, &error)
+            _ = CGImageMetadataRegisterNamespaceForPrefix(metadata, Self.iioNamespace as CFString, "iio" as CFString, &error)
             error = nil
             _ = CGImageMetadataSetValueWithPath(metadata, nil, "iio:hasXMP" as CFString, kCFBooleanTrue)
         }
 
         // Keep IPTC-only values: ImageIO rebuilds the IPTC block from XMP, so mirror them into XMP first.
-        for mapping in Self.mappings where mapping.fallback?.dictionary == kCGImagePropertyIPTCDictionary {
+        for mapping in Self.mappings where mapping.fallback?.dictionary == kCGImagePropertyIPTCDictionary as String {
             let hasXMP = existing.flatMap { CGImageMetadataCopyTagWithPath($0, nil, mapping.path as CFString) } != nil
-            guard !hasXMP, let fallback = mapping.fallback,
-                  let dictionary = properties[fallback.dictionary] as? [CFString: Any] else { continue }
-            let strings = Self.strings(from: dictionary[fallback.key] as CFTypeRef?)
-            guard !strings.isEmpty else { continue }
-            try apply(mapping.kind == .list ? .list(strings) : .text(strings.joined(separator: "; ")), path: mapping.path, shape: mapping.shape, to: metadata)
+            guard !hasXMP, let strings = mapping.fallback?.strings(in: properties), !strings.isEmpty else { continue }
+            try apply(FieldValue(strings: strings, kind: mapping.field.kind), path: mapping.path, shape: mapping.shape, to: metadata)
         }
 
-        for (fieldKey, entry) in changes {
-            let value: FieldValue? = entry
-            if fieldKey.id.hasPrefix("xmp:") {
-                let path = String(fieldKey.id.dropFirst(4))
+        for (key, value) in changes {
+            if case .xmp(let path) = key {
                 let fallbackShape: XMPShape
                 if case .list? = value { fallbackShape = .seq } else { fallbackShape = .text }
                 let shape = Self.shape(ofExisting: path, in: existing) ?? fallbackShape
                 try apply(value, path: path, shape: shape, to: metadata)
-            } else if let mapping = Self.mappings.first(where: { $0.key == fieldKey }) {
+            } else if let mapping = Self.mappingsByKey[key] {
                 try apply(value, path: mapping.path, shape: mapping.shape, to: metadata)
             }
         }
@@ -342,17 +319,17 @@ final class ImageIOProvider: MetadataProvider {
         let ok: Bool
         switch shape {
         case .text:
-            ok = CGImageMetadataSetValueWithPath(metadata, nil, path as CFString, strings.joined(separator: "; ") as CFString)
+            ok = CGImageMetadataSetValueWithPath(metadata, nil, path as CFString, strings.joined(separator: FieldValue.separator) as CFString)
         case .langAlt:
             _ = CGImageMetadataRemoveTagWithPath(metadata, nil, path as CFString)
-            ok = CGImageMetadataSetValueWithPath(metadata, nil, "\(path)[x-default]" as CFString, strings.joined(separator: "; ") as CFString)
+            ok = CGImageMetadataSetValueWithPath(metadata, nil, "\(path)[x-default]" as CFString, strings.joined(separator: FieldValue.separator) as CFString)
         case .seq, .bag:
             let parts = path.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2, let namespace = Self.namespaces[parts[0]] else {
                 throw MetadataError(tr("Unknown XMP namespace in %@", path))
             }
             let tagType: CGImageMetadataType = shape == .seq ? .arrayOrdered : .arrayUnordered
-            guard let tag = CGImageMetadataTagCreate(namespace, parts[0] as CFString, parts[1] as CFString, tagType, strings as CFArray) else {
+            guard let tag = CGImageMetadataTagCreate(namespace as CFString, parts[0] as CFString, parts[1] as CFString, tagType, strings as CFArray) else {
                 throw MetadataError(tr("Could not create tag %@", path))
             }
             ok = CGImageMetadataSetTagWithPath(metadata, nil, path as CFString, tag)

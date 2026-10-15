@@ -1,14 +1,12 @@
 import Foundation
 
 /// Fields of the General group are shared between providers: an audio file and a photo both expose
-/// `general.title`, so a mixed selection edits one row. Display order follows this list.
+/// `.general(.title)`, so a mixed selection edits one row. Display order follows this list.
 /// Which of them a file gets, and how they are labelled, depends on its category.
 /// See docs/metadata-schema.md.
-enum GeneralField: String, CaseIterable {
+enum GeneralField: CaseIterable, FieldDefinition {
     case title, artist, album, albumArtist, date, genre, track, disc, composer
     case comment, description, keywords, copyright, rating, cover
-
-    static let providerID = "general"
 
     /// General fields offered per category, in the "Fields per file type" table of the schema.
     static func fields(for category: MediaCategory) -> Set<GeneralField> {
@@ -24,9 +22,9 @@ enum GeneralField: String, CaseIterable {
         }
     }
 
-    var key: FieldKey { FieldKey(provider: Self.providerID, id: rawValue) }
+    var key: FieldKey { .general(self) }
+    var group: FieldGroup { .general }
 
-    /// English label; FieldSpec.displayLabel translates it.
     func label(for category: MediaCategory) -> String {
         switch self {
         case .title: return "Title"
@@ -60,11 +58,5 @@ enum GeneralField: String, CaseIterable {
         case .cover: return .image
         default: return .text
         }
-    }
-
-    var order: Int { Self.allCases.firstIndex(of: self) ?? 0 }
-
-    func spec(for category: MediaCategory, writable: Bool = true) -> FieldSpec {
-        FieldSpec(key: key, label: label(for: category), group: .general, kind: kind, writable: writable, order: order)
     }
 }

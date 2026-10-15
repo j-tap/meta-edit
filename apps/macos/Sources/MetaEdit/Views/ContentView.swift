@@ -15,18 +15,18 @@ struct ContentView: View {
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button { state.openPanel() } label: { Label(tr("Add Files…"), systemImage: "plus") }
-                    .help(tr("Add files or folders (⌘O)"))
+                    .help(tr("Add files or folders (%@)", Shortcut.open.symbols))
                 Button { state.removeSelected() } label: { Label(tr("Remove"), systemImage: "minus") }
                     .disabled(state.selection.isEmpty)
                     .help(tr("Remove from list"))
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { state.saveSelected() } label: { Label(tr("Save"), systemImage: "square.and.arrow.down") }
-                    .disabled(!state.selectionIsDirty || state.isSaving)
-                    .help(tr("Save selected files (⌘S)"))
+                    .disabled(!state.canSaveSelected)
+                    .help(tr("Save selected files (%@)", Shortcut.save.symbols))
                 Button { state.saveAll() } label: { Label(tr("Save All"), systemImage: "square.and.arrow.down.on.square") }
-                    .disabled(state.dirtyFiles.isEmpty || state.isSaving)
-                    .help(tr("Save all changed files (⇧⌘S)"))
+                    .disabled(!state.canSaveAll)
+                    .help(tr("Save all changed files (%@)", Shortcut.saveAll.symbols))
             }
         }
         .dropDestination(for: URL.self) { urls, _ in

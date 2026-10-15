@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 /// Interface languages. See docs/localization.md.
 enum AppLanguage: String, CaseIterable, Identifiable {
@@ -9,7 +10,12 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    static let supported: [AppLanguage] = [.en, .ru, .es, .zhHans]
+    /// The languages the interface is translated into. Resources/Info.plist lists the same ones in
+    /// CFBundleLocalizations; ProviderTests.languagesMatchInfoPlist keeps the two in step.
+    static let supported = allCases.filter { $0 != .system }
+
+    /// Preferred languages of an app or of the user, read by macOS for the menus it provides itself.
+    static let appleLanguagesKey = "AppleLanguages"
 
     /// Name of the language in that language, so it is recognisable whatever the current one is.
     var nativeName: String {
@@ -31,43 +37,69 @@ enum AppLanguage: String, CaseIterable, Identifiable {
 
     /// Preferred languages of the user, ignoring the per-app override this app writes for system menus.
     private static var systemLanguages: [String] {
-        let global = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleLanguages"] as? [String]
+        let global = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?[appleLanguagesKey] as? [String]
         return global ?? Locale.preferredLanguages
     }
 }
 
 /// Translates interface strings. English strings are the keys; a missing translation falls back to the key.
-/// Views read `current`, so changing the language re-renders them without a restart.
-@Observable
-final class Localizer: @unchecked Sendable {
+/// Safe to use from any thread, since providers translate their error messages in the background.
+/// Views that call tr() observe the language, so changing it re-renders them without a restart.
+final class Localizer: Observable, Sendable {
     static let shared = Localizer()
 
     private static let settingKey = "language"
 
+    private struct State: Sendable {
+        var choice: AppLanguage
+        var current: AppLanguage
+    }
+
+    private let state: OSAllocatedUnfairLock<State>
+    private let registrar = ObservationRegistrar()
+
+    init() {
+        let choice = UserDefaults.standard.string(forKey: Self.settingKey).flatMap(AppLanguage.init(rawValue:)) ?? .system
+        state = OSAllocatedUnfairLock(initialState: State(choice: choice, current: Self.resolve(choice)))
+        Self.persist(choice)
+    }
+
+    /// The language picked in Settings, possibly `.system`.
     var choice: AppLanguage {
-        didSet { apply() }
+        get {
+            registrar.access(self, keyPath: \.choice)
+            return state.withLock { $0.choice }
+        }
+        set {
+            registrar.withMutation(of: self, keyPath: \.choice) {
+                registrar.withMutation(of: self, keyPath: \.current) {
+                    state.withLock { $0 = State(choice: newValue, current: Self.resolve(newValue)) }
+                }
+            }
+            Self.persist(newValue)
+        }
     }
 
     /// The language in effect, never `.system`.
-    private(set) var current: AppLanguage = .en
+    var current: AppLanguage {
+        registrar.access(self, keyPath: \.current)
+        return state.withLock { $0.current }
+    }
 
     var locale: Locale { Locale(identifier: current.rawValue) }
 
-    init() {
-        choice = UserDefaults.standard.string(forKey: Self.settingKey).flatMap(AppLanguage.init(rawValue:)) ?? .system
-        apply()
+    private static func resolve(_ choice: AppLanguage) -> AppLanguage {
+        choice == .system ? AppLanguage.preferredBySystem : choice
     }
 
-    private func apply() {
-        current = choice == .system ? AppLanguage.preferredBySystem : choice
+    private static func persist(_ choice: AppLanguage) {
         let defaults = UserDefaults.standard
         if choice == .system {
-            defaults.removeObject(forKey: Self.settingKey)
-            // Menus that macOS itself provides follow AppleLanguages at launch.
-            defaults.removeObject(forKey: "AppleLanguages")
+            defaults.removeObject(forKey: settingKey)
+            defaults.removeObject(forKey: AppLanguage.appleLanguagesKey)
         } else {
-            defaults.set(choice.rawValue, forKey: Self.settingKey)
-            defaults.set([choice.rawValue], forKey: "AppleLanguages")
+            defaults.set(choice.rawValue, forKey: settingKey)
+            defaults.set([choice.rawValue], forKey: AppLanguage.appleLanguagesKey)
         }
     }
 
@@ -76,9 +108,10 @@ final class Localizer: @unchecked Sendable {
     }
 
     func plural(_ key: String, _ count: Int) -> String {
-        let forms = Translations.plurals[current]?[key] ?? Translations.plurals[.en]?[key] ?? [key]
-        let index = min(Self.pluralIndex(count, current), forms.count - 1)
-        return String(format: forms[index], locale: locale, count)
+        let language = current
+        let forms = Translations.plurals[language]?[key] ?? Translations.plurals[.en]?[key] ?? [key]
+        let index = min(Self.pluralIndex(count, language), forms.count - 1)
+        return String(format: forms[index], locale: Locale(identifier: language.rawValue), count)
     }
 
     /// CLDR plural categories, reduced to what the supported languages need: one / few / many.

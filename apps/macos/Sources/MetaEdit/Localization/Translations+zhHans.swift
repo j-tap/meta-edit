@@ -110,10 +110,10 @@ extension Translations {
         "Remove from list": "从列表中移除",
         "Filter files": "筛选文件",
         "Add Files…": "添加文件…",
-        "Add files or folders (⌘O)": "添加文件或文件夹（⌘O）",
+        "Add files or folders (%@)": "添加文件或文件夹（%@）",
         "Remove": "移除",
-        "Save selected files (⌘S)": "保存所选文件（⌘S）",
-        "Save all changed files (⇧⌘S)": "保存所有已更改的文件（⇧⌘S）",
+        "Save selected files (%@)": "保存所选文件（%@）",
+        "Save all changed files (%@)": "保存所有已更改的文件（%@）",
 
         // Settings
         "Language": "语言",
@@ -126,7 +126,7 @@ extension Translations {
         "Reveal in Finder": "在访达中显示",
         "Revert Changes": "还原更改",
         "No files": "没有文件",
-        "Drop files or folders here, or press ⌘O.": "将文件或文件夹拖到此处，或按 ⌘O。",
+        "Drop files or folders here, or press %@.": "将文件或文件夹拖到此处，或按 %@。",
         "%@, %d selected": "%@，已选 %d 个",
         "Unsaved changes": "有未保存的更改",
         "Already in the list": "已在列表中",
