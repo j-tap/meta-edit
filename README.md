@@ -1,4 +1,4 @@
-# MeteEdit
+# MetaEdit
 
 A simple metadata editor for any file: music, video, images, documents and plain files.
 Open a file or a whole folder, see every metadata field, edit it, save. The file itself is never

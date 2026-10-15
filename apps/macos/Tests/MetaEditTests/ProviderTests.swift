@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import Testing
-@testable import MeteEdit
+@testable import MetaEdit
 
 @Suite(.serialized)
 final class ProviderTests {
@@ -10,7 +10,7 @@ final class ProviderTests {
     private let tempDir: URL
 
     init() throws {
-        tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("meteedit-tests-\(UUID().uuidString)")
+        tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("metaedit-tests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     }
 

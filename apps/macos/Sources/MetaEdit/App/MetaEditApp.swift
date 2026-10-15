@@ -2,12 +2,12 @@ import AppKit
 import SwiftUI
 
 @main
-struct MeteEditApp: App {
+struct MetaEditApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     private let state = AppState.shared
 
     var body: some Scene {
-        Window("MeteEdit", id: "main") {
+        Window("MetaEdit", id: "main") {
             ContentView()
                 .environment(state)
                 .frame(minWidth: 860, minHeight: 540)

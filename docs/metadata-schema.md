@@ -1,6 +1,6 @@
 # Metadata schema
 
-This document defines what every MeteEdit app shows and writes. The three apps implement it with
+This document defines what every MetaEdit app shows and writes. The three apps implement it with
 different libraries; the behaviour must be the same. A change in behaviour starts here.
 
 ## Field model

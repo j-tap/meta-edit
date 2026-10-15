@@ -1,4 +1,4 @@
-# MeteEdit for macOS
+# MetaEdit for macOS
 
 Native macOS app: Swift and SwiftUI, TagLib for audio and MP4/Matroska tags, ImageIO for image
 metadata, resource values and extended attributes for file attributes. Minimum macOS 14.
@@ -15,9 +15,9 @@ metadata, resource values and extended attributes for file attributes. Minimum m
 ```
 scripts/build-taglib.sh      # downloads TagLib, builds universal static libraries into vendor/ (once)
 scripts/test.sh              # swift test with the flags that make Swift Testing work under the Command Line Tools
-scripts/build-app.sh         # swift build, assembles dist/MeteEdit.app with icon and ad hoc signature
-scripts/make-dmg.sh          # wraps the app into dist/MeteEdit-<version>-macos.dmg
-open dist/MeteEdit.app
+scripts/build-app.sh         # swift build, assembles dist/MetaEdit.app with icon and ad hoc signature
+scripts/make-dmg.sh          # wraps the app into dist/MetaEdit-<version>-macos.dmg
+open dist/MetaEdit.app
 ```
 
 `ARCHS=native scripts/build-app.sh` builds only the host architecture, which is faster while developing.
@@ -45,7 +45,7 @@ Not yet: ExifTool integration, PDF and Office documents, Markdown front matter, 
 ## Notes on platform quirks
 
 - The macOS 26+ SDK declares `@State` as a macro whose plugin ships only with Xcode. The app uses
-  `@ViewState`, an alias of the `State` property wrapper (`Sources/MeteEdit/Support/ViewState.swift`),
+  `@ViewState`, an alias of the `State` property wrapper (`Sources/MetaEdit/Support/ViewState.swift`),
   so it builds with the Command Line Tools too. Behaviour is identical.
 - SwiftPM under the Command Line Tools does not reliably pick a test library; `scripts/test.sh` passes
   `--enable-swift-testing --disable-xctest`.
@@ -58,10 +58,10 @@ Not yet: ExifTool integration, PDF and Office documents, Markdown front matter, 
 ## Layout
 
 ```
-Package.swift            SwiftPM manifest: CTagLib system library, MeteEdit executable, tests
+Package.swift            SwiftPM manifest: CTagLib system library, MetaEdit executable, tests
 Sources/CTagLib/         module map for the TagLib C API
-Sources/MeteEdit/        App, Model, Providers, Views, Support
-Tests/MeteEditTests/     Swift Testing suite and generated fixtures
+Sources/MetaEdit/        App, Model, Providers, Views, Support
+Tests/MetaEditTests/     Swift Testing suite and generated fixtures
 Resources/               Info.plist, AppIcon.icns
 scripts/                 build-taglib, build-app, make-dmg, make-icon, make-samples, test
 vendor/                  TagLib build output, not committed

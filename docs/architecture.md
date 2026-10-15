@@ -47,7 +47,7 @@ The three apps implement the same documents:
 
 ```
 apps/macos/     Swift package, TagLib build script, app bundle and DMG scripts
-apps/windows/   .NET solution: MeteEdit.Core (portable), MeteEdit.Wpf (UI)
+apps/windows/   .NET solution: MetaEdit.Core (portable), MetaEdit.Wpf (UI)
 apps/linux/     Python package, Flatpak manifest, Debian packaging
 docs/           shared specification
 scripts/        release tooling
@@ -66,9 +66,9 @@ make release V=1.2.0
 `scripts/release.sh` checks that the tree is clean and on `main`, writes `VERSION`, commits `Release 1.2.0`,
 tags `v1.2.0` and pushes. GitHub Actions (`.github/workflows/release.yml`) reacts to the tag:
 
-1. `macos-latest` builds TagLib and the Swift app, signs it ad hoc and produces `MeteEdit-1.2.0-macos.dmg`.
-2. `windows-latest` publishes a self-contained x64 build: `MeteEdit-1.2.0-windows-x64.zip`.
-3. `ubuntu-latest` builds `MeteEdit-1.2.0-linux-amd64.deb` and `MeteEdit-1.2.0.flatpak`.
+1. `macos-latest` builds TagLib and the Swift app, signs it ad hoc and produces `MetaEdit-1.2.0-macos.dmg`.
+2. `windows-latest` publishes a self-contained x64 build: `MetaEdit-1.2.0-windows-x64.zip`.
+3. `ubuntu-latest` builds `MetaEdit-1.2.0-linux-amd64.deb` and `MetaEdit-1.2.0.flatpak`.
 4. A final job creates the GitHub Release `v1.2.0` and attaches every artifact.
 
 `ci.yml` runs the same builds plus tests on every push and pull request without publishing. The macOS job builds the

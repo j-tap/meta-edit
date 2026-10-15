@@ -23,8 +23,8 @@ jobs:
       - name: Build app
         run: apps/macos/scripts/build-app.sh
       - name: Zip app bundle
-        run: ditto -c -k --keepParent apps/macos/dist/MeteEdit.app apps/macos/dist/MeteEdit-macos.zip
+        run: ditto -c -k --keepParent apps/macos/dist/MetaEdit.app apps/macos/dist/MetaEdit-macos.zip
       - uses: actions/upload-artifact@v4
         with:
-          name: MeteEdit-macos
-          path: apps/macos/dist/MeteEdit-macos.zip
+          name: MetaEdit-macos
+          path: apps/macos/dist/MetaEdit-macos.zip

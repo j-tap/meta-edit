@@ -304,7 +304,7 @@ final class ImageIOProvider: MetadataProvider {
         }
 
         let temporary = url.deletingLastPathComponent()
-            .appendingPathComponent(".\(url.lastPathComponent).meteedit-\(UUID().uuidString.prefix(8))")
+            .appendingPathComponent(".\(url.lastPathComponent).metaedit-\(UUID().uuidString.prefix(8))")
         guard let destination = CGImageDestinationCreateWithURL(temporary as CFURL, type, 1, nil) else {
             throw MetadataError("Could not create \(temporary.lastPathComponent)")
         }

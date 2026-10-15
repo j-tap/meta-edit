@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>MeteEdit</string>
+	<string>MetaEdit</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.j-tap.MeteEdit</string>
+	<string>io.github.j-tap.MetaEdit</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>MeteEdit</string>
+	<string>MetaEdit</string>
 	<key>CFBundleDisplayName</key>
-	<string>MeteEdit</string>
+	<string>MetaEdit</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

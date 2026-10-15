@@ -5,14 +5,14 @@ import PackageDescription
 let vendor = Context.packageDirectory + "/vendor/taglib"
 
 let package = Package(
-    name: "MeteEdit",
+    name: "MetaEdit",
     platforms: [.macOS(.v14)],
     targets: [
         .systemLibrary(name: "CTagLib", path: "Sources/CTagLib"),
         .executableTarget(
-            name: "MeteEdit",
+            name: "MetaEdit",
             dependencies: ["CTagLib"],
-            path: "Sources/MeteEdit",
+            path: "Sources/MetaEdit",
             swiftSettings: [
                 .unsafeFlags(["-Xcc", "-I\(vendor)/include"]),
             ],
@@ -25,9 +25,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "MeteEditTests",
-            dependencies: ["MeteEdit"],
-            path: "Tests/MeteEditTests",
+            name: "MetaEditTests",
+            dependencies: ["MetaEdit"],
+            path: "Tests/MetaEditTests",
             resources: [.copy("Fixtures")],
             swiftSettings: [
                 .unsafeFlags(["-Xcc", "-I\(vendor)/include"]),
