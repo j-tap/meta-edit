@@ -20,4 +20,4 @@ if [[ -d "$frameworks/Testing.framework" && -d "$plugins" ]]; then
     -Xlinker -rpath -Xlinker "$frameworks"
   )
 fi
-swift test --enable-swift-testing --disable-xctest "${extra[@]}" "$@"
+swift test --enable-swift-testing --disable-xctest ${extra[@]+"${extra[@]}"} "$@"
