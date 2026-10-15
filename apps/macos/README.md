@@ -87,6 +87,9 @@ vendor/                  TagLib build output, not committed
   `.tagLib` and `.image` belong to one provider, and raw tags carry the name their container uses. Labels,
   groups and kinds are defined once in the field enums (`Model/GeneralField.swift`, `Model/ProviderFields.swift`);
   providers only map those fields onto their containers.
+- Covers are kept as `Picture`: a thumbnail of at most 256 pixels, the type, the size and a SHA-256 digest.
+  The bytes stay in the file and are read again to export a cover or copy it to other files, so a
+  selection of thousands of tracks does not hold every cover in memory. Identical covers share one thumbnail.
 - `Localizer` is thread safe, since providers translate error messages in the background, and observable, so
   views re-render when the language changes.
 - Each build setting has one source. The version is in `VERSION`, the minimum macOS version in the platforms of

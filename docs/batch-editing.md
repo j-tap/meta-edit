@@ -23,6 +23,9 @@ than one file is selected.
   the separate remove button next to it removes the field from every selected file.
 - Cover: a mixed cover shows a stacked placeholder. Dropping or choosing an image sets it for all selected files; Remove removes it from all.
   The cover is the first embedded picture; other pictures (back cover, booklet) are kept when it is replaced or removed.
+  Covers are compared by a digest of their bytes. Choosing a cover from the "values differ" list copies it from
+  the file that holds it; if that file changed since it was loaded, the save fails for the affected files
+  instead of writing a different picture than the one shown.
 - A staged value can be limited to files where the field is currently empty: "Only where empty", offered per field in the confirmation dialog, off by default.
 - Lists (keywords, tags) in a mixed state offer "Add to all" for appending without replacing existing items (planned).
 - General fields (title, artist, keywords, ...) are shared across file types: one Keywords row edits ID3, Vorbis, MP4 and XMP keywords alike.

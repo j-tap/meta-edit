@@ -177,6 +177,7 @@ extension Translations {
         "Unsupported or damaged media file": "Неподдерживаемый или повреждённый медиафайл",
         "Could not remove the cover": "Не удалось удалить обложку",
         "Could not set the cover": "Не удалось задать обложку",
+        "The cover of %@ changed since it was loaded": "Обложка в %@ изменилась после загрузки",
         "ImageIO could not open %@": "ImageIO не может открыть %@",
         "ImageIO cannot write %@ files": "ImageIO не умеет записывать файлы %@",
         "ImageIO could not write %@: %@": "ImageIO не может записать %@: %@",

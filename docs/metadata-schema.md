@@ -10,7 +10,8 @@ A file is described by a list of fields. Each field has:
 - `key`: stable identifier in lower camel case (`title`, `albumArtist`, `whereFrom`).
 - `group`: the editor section that shows it (see below).
 - `kind`: `text`, `multiline`, `integer`, `boolean`, `date`, `list` (ordered strings, edited comma separated),
-  `lines` (ordered strings edited one per line, for items that may contain commas, such as URLs), `image` (bytes plus MIME type).
+  `lines` (ordered strings edited one per line, for items that may contain commas, such as URLs), `image` (a picture: MIME type, size, a digest for comparing and a thumbnail for display;
+  the bytes stay in the file until they are exported or copied to other files).
   An `integer` field accepts only a whole number (or nothing); other input is marked and not staged.
 - `writable`: whether the provider can write it back. Read-only fields live in the Technical group.
 - `value`: present or absent. Absent means "no such tag in the file". An empty string is never stored:

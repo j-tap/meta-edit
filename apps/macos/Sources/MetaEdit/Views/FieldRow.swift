@@ -292,19 +292,22 @@ struct CoverField: View {
     let field: FieldState
     let files: [FileItem]
     @ViewState private var isTargeted = false
-    /// The decoded cover, updated when its bytes change rather than on every render.
+    /// The decoded thumbnail, updated when the picture changes rather than on every render.
     @ViewState private var image: NSImage?
+
+    /// Side of the cover well; the thumbnails are made for it at Retina scale.
+    private static let wellSize = CGFloat(Picture.thumbnailPixelSize / 2)
 
     private var key: FieldKey { field.spec.key }
 
-    private var coverData: Data? {
-        if case .image(let data, _)? = field.displayValue { return data }
+    private var picture: Picture? {
+        if case .picture(let picture)? = field.displayValue { return picture }
         return nil
     }
 
     private var anyHasCover: Bool {
         files.contains { file in
-            if case .image? = file.currentValue(for: key) { return true }
+            if case .picture? = file.currentValue(for: key) { return true }
             return false
         }
     }
@@ -324,7 +327,7 @@ struct CoverField: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            .frame(width: 128, height: 128)
+            .frame(width: Self.wellSize, height: Self.wellSize)
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isTargeted ? Color.accentColor : .clear, lineWidth: 2))
             .dropDestination(for: URL.self) { urls, _ in
                 guard let url = urls.first else { return false }
@@ -336,9 +339,9 @@ struct CoverField: View {
                 Button(tr("Remove")) { state.stage(nil, for: key, in: files) }
                     .disabled(!anyHasCover)
                 Button(tr("Export…")) { export() }
-                    .disabled(image == nil)
-                if let image, let rep = image.representations.first {
-                    Text("\(rep.pixelsWide) × \(rep.pixelsHigh)")
+                    .disabled(picture == nil)
+                if let width = picture?.pixelWidth, let height = picture?.pixelHeight {
+                    Text("\(width) × \(height)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if field.isMixed {
@@ -350,18 +353,19 @@ struct CoverField: View {
             }
             .controlSize(.small)
         }
-        .onChange(of: coverData, initial: true) { _, data in
-            image = data.flatMap(NSImage.init(data:))
+        .onChange(of: picture, initial: true) { _, picture in
+            image = picture?.thumbnail.flatMap(NSImage.init(data:))
         }
     }
 
     private func load(_ url: URL) throws {
-        let data = try Data(contentsOf: url)
-        guard NSImage(data: data) != nil else {
+        let bytes = try Data(contentsOf: url)
+        // The type comes from the bytes, so a PNG named cover.jpg is still written as a PNG.
+        let picture = Picture(bytes: bytes, mimeType: nil, source: .bytes(bytes))
+        guard picture.isDecodable else {
             throw MetadataError(tr("%@ is not an image", url.lastPathComponent))
         }
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? FieldValue.fallbackImageMIMEType
-        state.stage(.image(data, mime: mime), for: key, in: files)
+        state.stage(.picture(picture), for: key, in: files)
     }
 
     private func choose() {
@@ -377,16 +381,16 @@ struct CoverField: View {
     }
 
     private func export() {
-        guard case .image(let data, let mime)? = field.displayValue else { return }
+        guard let picture else { return }
         let panel = NSSavePanel()
         // The panel adds the extension of the allowed type to the name.
-        if let type = UTType(mimeType: mime) ?? UTType(mimeType: FieldValue.fallbackImageMIMEType) {
+        if let type = UTType(mimeType: picture.mimeType) ?? UTType(mimeType: FieldValue.fallbackImageMIMEType) {
             panel.allowedContentTypes = [type]
         }
         panel.nameFieldStringValue = files.first?.url.deletingPathExtension().lastPathComponent ?? ""
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try data.write(to: url, options: .atomic)
+            try picture.bytes().write(to: url, options: .atomic)
         } catch {
             NSAlert(error: error).runModal()
         }

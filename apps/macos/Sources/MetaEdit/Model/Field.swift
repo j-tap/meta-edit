@@ -100,7 +100,7 @@ enum FieldValue: Hashable, Sendable {
     case list([String])
     case bool(Bool)
     case date(Date)
-    case image(Data, mime: String)
+    case picture(Picture)
 
     /// Joins the values of a multi-valued tag shown in a single-value field.
     static let separator = "; "
@@ -124,7 +124,7 @@ enum FieldValue: Hashable, Sendable {
         switch self {
         case .text(let s): return s.isEmpty
         case .list(let l): return l.isEmpty
-        case .image(let d, _): return d.isEmpty
+        case .picture(let picture): return picture.byteCount == 0
         case .bool, .date: return false
         }
     }
@@ -135,8 +135,8 @@ enum FieldValue: Hashable, Sendable {
         case .list(let l): return l.joined(separator: ", ")
         case .bool(let b): return b ? tr("Yes") : tr("No")
         case .date(let d): return d.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(Localizer.shared.locale))
-        case .image(let d, let mime):
-            return "\(mime), \(ByteCountFormatter.string(fromByteCount: Int64(d.count), countStyle: .file))"
+        case .picture(let picture):
+            return "\(picture.mimeType), \(ByteCountFormatter.string(fromByteCount: Int64(picture.byteCount), countStyle: .file))"
         }
     }
 
@@ -147,7 +147,7 @@ enum FieldValue: Hashable, Sendable {
         case .list(let l): return l.filter { !$0.isEmpty }
         case .bool(let b): return [b ? "1" : "0"]
         case .date(let d): return [d.formatted(.iso8601)]
-        case .image: return []
+        case .picture: return []
         }
     }
 }

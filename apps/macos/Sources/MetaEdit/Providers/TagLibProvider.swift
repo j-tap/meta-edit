@@ -122,7 +122,7 @@ struct TagLibProvider: MetadataProvider {
     }
 
     /// Opens the file, checks that TagLib understands it and closes it after `body`.
-    private func withFile<Result>(_ url: URL, _ body: (UnsafeMutablePointer<TagLib_File>) throws -> Result) throws -> Result {
+    private static func withFile<Result>(_ url: URL, _ body: (UnsafeMutablePointer<TagLib_File>) throws -> Result) throws -> Result {
         _ = Self.configureTagLib
         guard let file = taglib_file_new(url.path) else {
             throw MetadataError(tr("TagLib could not open %@", url.lastPathComponent))
@@ -140,7 +140,7 @@ struct TagLibProvider: MetadataProvider {
         guard let format = Self.format(of: url) else {
             throw MetadataError(tr("Unsupported or damaged media file"))
         }
-        return try withFile(url) { file in
+        return try Self.withFile(url) { file in
             let props = readProperties(file)
             var data = ProviderData()
 
@@ -156,7 +156,8 @@ struct TagLibProvider: MetadataProvider {
             }
 
             if GeneralField.fields(for: format.category).contains(.cover) {
-                data.add(GeneralField.cover.spec(for: format.category), readPicture(file))
+                let cover = Self.embeddedCover(file).map { Picture(bytes: $0.bytes, mimeType: $0.mimeType, source: .file(url)) }
+                data.add(GeneralField.cover.spec(for: format.category), cover.map(FieldValue.picture))
             }
 
             if let properties = taglib_file_audioproperties(file) {
@@ -211,15 +212,24 @@ struct TagLibProvider: MetadataProvider {
         return result
     }
 
-    private func readPicture(_ file: UnsafeMutablePointer<TagLib_File>) -> FieldValue? {
-        guard let properties = taglib_complex_property_get(file, Self.pictureKey) else { return nil }
+    /// The bytes of the cover embedded in `url`, for a Picture that keeps only its digest.
+    static func coverBytes(of url: URL) throws -> Data {
+        let cover = try withFile(url) { embeddedCover($0) }
+        guard let cover else {
+            throw MetadataError(tr("The cover of %@ changed since it was loaded", url.lastPathComponent))
+        }
+        return cover.bytes
+    }
+
+    /// The first embedded picture, the one shown as the cover, with the MIME type its tag declares.
+    private static func embeddedCover(_ file: UnsafeMutablePointer<TagLib_File>) -> (bytes: Data, mimeType: String?)? {
+        guard let properties = taglib_complex_property_get(file, pictureKey) else { return nil }
         defer { taglib_complex_property_free(properties) }
         var picture = TagLib_Complex_Property_Picture_Data()
         taglib_picture_from_complex_property(properties, &picture)
         guard let bytes = picture.data, picture.size > 0 else { return nil }
-        let data = Data(bytes: bytes, count: Int(picture.size))
-        let mime = picture.mimeType.map { String(cString: $0) } ?? FieldValue.fallbackImageMIMEType
-        return .image(data, mime: mime)
+        let mimeType = picture.mimeType.map { String(cString: $0) }.flatMap { $0.isEmpty ? nil : $0 }
+        return (Data(bytes: bytes, count: Int(picture.size)), mimeType)
     }
 
     // MARK: Write
@@ -228,11 +238,18 @@ struct TagLibProvider: MetadataProvider {
         guard let format = Self.format(of: url) else {
             throw MetadataError(tr("Unsupported or damaged media file"))
         }
-        try withFile(url) { file in
+        // A cover copied from another file is read before this one is opened for writing.
+        let cover: (bytes: Data, mimeType: String)?
+        if case .picture(let picture)?? = changes[.general(.cover)] {
+            cover = (try picture.bytes(), picture.mimeType)
+        } else {
+            cover = nil
+        }
+        try Self.withFile(url) { file in
             for (key, value) in changes {
                 switch key {
                 case .general(.cover):
-                    try setPicture(file, value)
+                    try setPicture(file, cover)
                 case .tagLibProperty(let name):
                     setProperty(file, name, value?.strings)
                 default:
@@ -285,9 +302,9 @@ struct TagLibProvider: MetadataProvider {
 
     typealias PictureAttributes = UnsafeMutablePointer<UnsafePointer<TagLib_Complex_Property_Attribute>?>
 
-    /// Replaces the first embedded picture, the one shown as the cover, or removes it when `value` is nil.
+    /// Replaces the first embedded picture, the one shown as the cover, or removes it when `cover` is nil.
     /// Other pictures (back cover, booklet pages) are kept.
-    private func setPicture(_ file: UnsafeMutablePointer<TagLib_File>, _ value: FieldValue?) throws {
+    private func setPicture(_ file: UnsafeMutablePointer<TagLib_File>, _ cover: (bytes: Data, mimeType: String)?) throws {
         let existing = taglib_complex_property_get(file, Self.pictureKey)
         defer { if let existing { taglib_complex_property_free(existing) } }
         let others = Self.pictures(in: existing).dropFirst()
@@ -301,10 +318,8 @@ struct TagLibProvider: MetadataProvider {
         }
 
         var ok = true
-        let cover: (data: Data, mime: String)?
-        if case .image(let data, let mime)? = value, !data.isEmpty { cover = (data, mime) } else { cover = nil }
-        if let cover {
-            ok = Self.withPictureAttributes(data: cover.data, mime: cover.mime, body: store)
+        if let cover, !cover.bytes.isEmpty {
+            ok = Self.withPictureAttributes(data: cover.bytes, mime: cover.mimeType, body: store)
         }
         for picture in others where ok {
             ok = store(picture)

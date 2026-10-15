@@ -177,6 +177,7 @@ extension Translations {
         "Unsupported or damaged media file": "不支持或已损坏的媒体文件",
         "Could not remove the cover": "无法移除封面",
         "Could not set the cover": "无法设置封面",
+        "The cover of %@ changed since it was loaded": "%@ 的封面在载入后已更改",
         "ImageIO could not open %@": "ImageIO 无法打开 %@",
         "ImageIO cannot write %@ files": "ImageIO 无法写入 %@ 文件",
         "ImageIO could not write %@: %@": "ImageIO 无法写入 %@：%@",

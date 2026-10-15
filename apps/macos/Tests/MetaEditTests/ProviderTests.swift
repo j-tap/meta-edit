@@ -33,6 +33,31 @@ final class ProviderTests {
         return item
     }
 
+    /// A picture the user picked, as CoverField stages it.
+    private func picked(_ bytes: Data) -> FieldValue {
+        .picture(Picture(bytes: bytes, mimeType: nil, source: .bytes(bytes)))
+    }
+
+    /// A JPEG cover of `side` × `side` pixels with enough detail to be realistically large.
+    private func largeCover(side: Int = 1200) throws -> Data {
+        let context = try #require(CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<2000 {
+            context.setFillColor(red: .random(in: 0...1, using: &generator), green: .random(in: 0...1, using: &generator),
+                                 blue: .random(in: 0...1, using: &generator), alpha: 1)
+            context.fill(CGRect(x: .random(in: 0..<Double(side)), y: .random(in: 0..<Double(side)), width: 40, height: 40))
+        }
+        let image = try #require(context.makeImage())
+        let output = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(output, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        #expect(CGImageDestinationFinalize(destination))
+        return output as Data
+    }
+
     /// MD5 of the decoded audio and video streams via ffmpeg; empty when ffmpeg is not installed (check skipped).
     private func decodedDigest(_ url: URL) throws -> String {
         let candidates = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
@@ -90,7 +115,7 @@ final class ProviderTests {
             let isVideo = ["sample.mp4", "sample.mkv"].contains(name)
             var edits: [(GeneralField, FieldValue)] = [
                 (.title, .text("New Title")), (.artist, .text("New Artist")), (.genre, .text("Jazz")),
-                (.comment, .text("Hello\nWorld")), (.cover, .image(cover, mime: "image/png")),
+                (.comment, .text("Hello\nWorld")), (.cover, picked(cover)),
             ]
             edits += isVideo
                 ? [(.description, .text("About this video"))]
@@ -103,11 +128,11 @@ final class ProviderTests {
             try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
             #expect(item.error == nil, Comment(rawValue: name))
             #expect(!(item.isDirty), Comment(rawValue: name))
-            for (field, value) in edits where field != .cover {
+            for (field, value) in edits {
                 #expect(item.values[field.key] == value, "\(name) \(field)")
             }
-            if case .image(let data, _)? = item.values[.general(.cover)] {
-                #expect(data == cover, "\(name) cover")
+            if case .picture(let picture)? = item.values[.general(.cover)] {
+                #expect(try picture.bytes() == cover, "\(name) cover")
             } else {
                 Issue.record("\(name): cover missing after save")
             }
@@ -186,17 +211,17 @@ final class ProviderTests {
         let front = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.png"))
         let back = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.jpg"))
         let item = load(url)
-        item.stage(.image(front, mime: "image/png"), for: .general(.cover))
+        item.stage(picked(front), for: .general(.cover))
         try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         try appendPicture(back, mime: "image/jpeg", type: "Back Cover", to: url)
         #expect(try pictureTypes(url) == ["Front Cover", "Back Cover"])
 
         // Replacing the cover keeps the back cover.
         item.load()
-        item.stage(.image(back, mime: "image/jpeg"), for: .general(.cover))
+        item.stage(picked(back), for: .general(.cover))
         try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
         #expect(try pictureTypes(url) == ["Front Cover", "Back Cover"])
-        #expect(item.values[.general(.cover)] == .image(back, mime: "image/jpeg"))
+        #expect(item.values[.general(.cover)] == picked(back))
 
         // Removing the cover removes only the first picture.
         item.stage(nil, for: .general(.cover))
@@ -465,6 +490,100 @@ final class ProviderTests {
         state.stage(.text("Same"), for: title, in: [a, b])
         await state.performSave([a, b], onlyWhereEmpty: []).value
         #expect(field(title).original == .same(.text("Same")))
+    }
+
+    // MARK: Covers
+
+    @Test func loadedCoverKeepsOnlyAThumbnail() async throws {
+        let url = try copy("sample.mp3")
+        let jpeg = try largeCover()
+        let item = load(url)
+        item.stage(picked(jpeg), for: .general(.cover))
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+
+        guard case .picture(let picture)? = item.values[.general(.cover)] else {
+            Issue.record("cover missing after save")
+            return
+        }
+        guard case .file(let source) = picture.source else {
+            Issue.record("a loaded cover must not keep its bytes")
+            return
+        }
+        #expect(source == url)
+        #expect(picture.byteCount == jpeg.count)
+        #expect(picture.mimeType == "image/jpeg")
+        #expect(picture.pixelWidth == 1200 && picture.pixelHeight == 1200)
+        let thumbnail = try #require(picture.thumbnail)
+        let thumbnailSource = try #require(CGImageSourceCreateWithData(thumbnail as CFData, nil))
+        let size = CGImageSourceCopyPropertiesAtIndex(thumbnailSource, 0, nil) as? [CFString: Any]
+        let longSide = max(size?[kCGImagePropertyPixelWidth] as? Int ?? 0, size?[kCGImagePropertyPixelHeight] as? Int ?? 0)
+        #expect(longSide == Picture.thumbnailPixelSize)
+        #expect(thumbnail.count * 4 < jpeg.count)
+        // The bytes are read back from the file on demand.
+        #expect(try picture.bytes() == jpeg)
+    }
+
+    @Test func coverCopiedFromAnotherFile() async throws {
+        let cover = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.png"))
+        let source = load(try copy("sample.mp3"))
+        source.stage(picked(cover), for: .general(.cover))
+        try await source.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        let fromFile = try #require(source.values[.general(.cover)])
+
+        // Picking another file's cover in the "values differ" popover stages a picture without bytes.
+        let target = load(try copy("sample.flac"))
+        target.stage(fromFile, for: .general(.cover))
+        try await target.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        #expect(target.error == nil)
+        guard case .picture(let written)? = target.values[.general(.cover)] else {
+            Issue.record("cover missing after save")
+            return
+        }
+        #expect(try written.bytes() == cover)
+    }
+
+    @Test func coverChangedOnDiskIsNotCopied() async throws {
+        let first = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.png"))
+        let second = try Data(contentsOf: Self.fixtures.appendingPathComponent("sample.jpg"))
+        let item = load(try copy("sample.mp3"))
+        item.stage(picked(first), for: .general(.cover))
+        try await item.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        guard case .picture(let loaded)? = item.values[.general(.cover)] else {
+            Issue.record("cover missing after save")
+            return
+        }
+        // Another app replaces the cover behind the editor's back.
+        _ = try ProviderRegistry.tagLib.write(url: item.url, changes: [.general(.cover): picked(second)])
+        #expect(throws: MetadataError.self) { try loaded.bytes() }
+    }
+
+    @Test func manyCoversStayOutOfMemory() async throws {
+        let cover = try largeCover()
+        let folder = tempDir.appendingPathComponent("album")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let template = load(try copy("sample.mp3"))
+        template.stage(picked(cover), for: .general(.cover))
+        try await template.save(preserveModificationDate: true, onlyWhereEmpty: [])
+        for index in 0..<20 {
+            try FileManager.default.copyItem(at: template.url, to: folder.appendingPathComponent("track\(index).mp3"))
+        }
+
+        let state = AppState()
+        await state.addURLs([folder]).value
+        #expect(state.files.count == 20)
+        for file in state.files {
+            guard case .picture(let picture)? = file.values[.general(.cover)] else {
+                Issue.record("\(file.name): cover missing")
+                continue
+            }
+            if case .bytes = picture.source {
+                Issue.record("\(file.name): the cover's bytes are kept in memory")
+            }
+            #expect((picture.thumbnail?.count ?? .max) * 4 < cover.count, Comment(rawValue: file.name))
+        }
+        // The same cover in every file is one value, so the selection shows it as uniform.
+        let field = SelectionFields.compute(state.files).flatMap(\.fields).first { $0.id == .general(.cover) }
+        #expect(field?.isMixed == false)
     }
 
     // MARK: Adding files
