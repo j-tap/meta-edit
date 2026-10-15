@@ -39,7 +39,7 @@ cmake -S "taglib-$TAGLIB_VERSION" -B build \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$MIN_MACOS" \
   -DCMAKE_INSTALL_PREFIX="$vendor" \
   -DCMAKE_INSTALL_LIBDIR=lib
-cmake --build build --parallel
+cmake --build build --parallel "$(sysctl -n hw.ncpu)"
 cmake --install build
 echo "$TAGLIB_VERSION" > "$vendor/.version"
 echo "TagLib $TAGLIB_VERSION installed to $vendor"
