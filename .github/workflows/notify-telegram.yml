@@ -1,0 +1,36 @@
+name: Notify Telegram
+
+on:
+  workflow_run:
+    workflows: ["CI","Release"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  notify:
+    if: github.event.workflow_run.conclusion != 'cancelled' && github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send message
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RESULT: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+          COMMIT: ${{ github.event.workflow_run.head_commit.message }}
+          URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          [ -n "$TOKEN" ] && [ -n "$CHAT_ID" ] || { echo "Секреты Telegram не заданы"; exit 0; }
+          if [ "$RESULT" = "success" ]; then ICON="✅"; else ICON="❌"; fi
+          TEXT="$ICON GitHub: $REPO
+          $WORKFLOW → $RESULT
+          Ветка: $BRANCH, автор: $ACTOR
+          ${COMMIT%%$'\n'*}
+          $URL"
+          curl -fsS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" >/dev/null
